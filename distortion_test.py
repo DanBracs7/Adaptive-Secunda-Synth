@@ -27,11 +27,16 @@ def main():
     # 4) Resample to 32 kHz
     target_sr = 32000
     if sr != target_sr:
-        # resample_poly is efficient and good quality
         audio = resample_poly(audio, target_sr, sr)
         sr = target_sr
     print("After resample:", audio.shape, "sr:", sr)
 
+    # 4.5) Normalize peak to at most 0.95 to avoid clipping EnCodec
+    peak = max(abs(audio.min()), abs(audio.max()))
+    print("Peak before normalize:", peak)
+    if peak > 0:
+        audio = audio / peak * 0.95
+    print("Peak after normalize:", max(abs(audio.min()), abs(audio.max())))
     # 5) Load EnCodec 32 kHz
     codec_id = "facebook/encodec_32khz"
     processor = AutoProcessor.from_pretrained(codec_id)
