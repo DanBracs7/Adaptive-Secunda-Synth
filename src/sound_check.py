@@ -1,7 +1,7 @@
 import torch
 from pathlib import Path
 from transformers import EncodecModel, AutoProcessor
-import torchaudio
+from scipy.io import wavfile  # NEW
 
 
 def load_codec(device: str = "cpu"):
@@ -12,7 +12,8 @@ def load_codec(device: str = "cpu"):
     return model, processor
 
 
-def decode_tokens_to_wav(tokens: torch.Tensor, model: EncodecModel, sample_rate: int = 32000, device: str = "cpu"):
+def decode_tokens_to_wav(tokens: torch.Tensor, model: EncodecModel,
+                         sample_rate: int = 32000, device: str = "cpu"):
     """
     tokens: [n_q, T] int64 tensor on CPU
     returns: audio [1, samples] float32 on CPU
@@ -26,8 +27,7 @@ def decode_tokens_to_wav(tokens: torch.Tensor, model: EncodecModel, sample_rate:
     with torch.no_grad():
         audio = model.decode(codes, scales, padding_mask=None)[0]  # [batch=1, samples]
 
-    audio = audio.cpu()
-    return audio
+    return audio.cpu()
 
 
 def main():
@@ -36,27 +36,33 @@ def main():
 
     # Path to your unzipped .pt files
     data_dir = Path("slakh2100-encodec32k-tension-pt") / "train"
-
-    # Pick one example
-    pt_path = data_dir / "train_000.pt"
+    train = "train_173" # Change this to the desired train file (e.g., "train_002", "train_003", etc.)  
+    pt_path = data_dir / f"{train}.pt"
     print(f"Loading {pt_path}")
+
     output_dir = Path("output/sound_check")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     data = torch.load(pt_path, map_location="cpu")
-    tokens = data["tokens"]      # [n_q, T]
-    tension = data["tension"]    # [T]
+    track_id = data.get("track_id", "UNKNOWN")
+    tokens = data["tokens"]
+    tension = data["tension"]
+
+    print("track_id:", track_id)
     print("tokens shape:", tokens.shape)
     print("tension shape:", tension.shape)
     print("tension min/max:", float(tension.min()), float(tension.max()))
 
     model, processor = load_codec(device=device)
-    sr = processor.sampling_rate  # should be 32000
+    sr = int(processor.sampling_rate)  # 32000
 
     audio = decode_tokens_to_wav(tokens, model, sample_rate=sr, device=device)
+    # audio is [1, samples]; make it 1D [samples]
+    audio_np = audio.squeeze().cpu().numpy()
+    print("decoded audio shape:", audio_np.shape, "dtype:", audio_np.dtype)
 
-    out_path = output_dir / "sound_check_train_000.wav"
-    torchaudio.save(str(out_path), audio.unsqueeze(0), sample_rate=sr)
+    out_path = output_dir / f"sound_check_{train}.wav"
+    wavfile.write(str(out_path), sr, audio_np.astype("float32"))
     print(f"Saved decoded audio to {out_path}")
 
 

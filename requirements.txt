@@ -1,0 +1,7 @@
+numpy<2.0.0
+transformers>=4.38,<4.54
+torch
+torchaudio
+torchcodec
+soundfile
+scipy
