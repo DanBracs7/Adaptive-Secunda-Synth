@@ -1,0 +1,25 @@
+# Environment & Virtual Environments
+.env
+.venv/
+env/
+venv/
+
+papers/
+output/
+# Dataset & Large Artifacts (The "Heavy" Stuff)
+slakh2100-encodec32k-tension-pt/
+dataset_artifact.zip
+
+# Wildcard for any zip files to be safe
+*.zip
+
+# Python & Jupyter Clutter (Crucial for Master's Projects)
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.DS_Store
+
+# Logs and Checkpoints
+checkpoints/
+outputs/
