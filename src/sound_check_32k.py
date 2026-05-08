@@ -40,7 +40,7 @@ def main():
     pt_path = data_dir / f"{train}.pt"
     print(f"Loading {pt_path}")
 
-    output_dir = Path("output/sound_check")
+    output_dir = Path("output/sound_check32k")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     data = torch.load(pt_path, map_location="cpu")
