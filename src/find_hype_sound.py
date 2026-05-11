@@ -4,7 +4,7 @@ from pathlib import Path
 #You can do the opposite to find very “chill” tracks: sort by mean_T ascending.
 
 def main():
-    data_dir = Path("slakh2100-encodec24k-tension-pt") / "train"
+    data_dir = Path("slakh2100-encodec24k-24band-tension-pt") / "train"
     stats = []
 
     for pt_path in sorted(data_dir.glob("train_*.pt")):

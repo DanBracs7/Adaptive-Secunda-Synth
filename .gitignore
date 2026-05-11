@@ -9,6 +9,7 @@ output/
 # Dataset & Large Artifacts (The "Heavy" Stuff)
 slakh2100-encodec32k-tension-pt/
 slakh2100-encodec24k-tension-pt/
+slakh2100-encodec24k-24band-tension-pt/
 
 dataset_artifact.zip
 
