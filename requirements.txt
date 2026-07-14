@@ -5,4 +5,4 @@ torchaudio
 torchcodec
 soundfile
 scipy
-ecnodec
+encodec

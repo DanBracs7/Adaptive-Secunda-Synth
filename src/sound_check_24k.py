@@ -29,7 +29,7 @@ def main():
 
     sample_numb = "24"
     data_dir = Path(f"slakh2100-encodec{sample_numb}k-24band-tension-pt") / "train"  # ← CHANGED: added -24band-
-    train = "train_632"
+    train = "train_483"
     pt_path = data_dir / f"{train}.pt"
     print(f"Loading {pt_path}")
 
