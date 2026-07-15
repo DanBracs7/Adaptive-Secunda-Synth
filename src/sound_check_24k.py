@@ -31,7 +31,7 @@ def main():
     folder_name = "custom_tracks"  # ← CHANGED: was "slakh2100-encodec{sample_numb}k-24band-tension-pt"
     data_dir = Path(f"{folder_name}") / "train"
     #data_dir = Path(f"slakh2100-encodec{sample_numb}k-24band-tension-pt") / "train"  # ← CHANGED: added -24band-
-    train = "train_017"
+    train = "train_025"
     pt_path = data_dir / f"{train}.pt"
     print(f"Loading {pt_path}")
     # output for customs tracks

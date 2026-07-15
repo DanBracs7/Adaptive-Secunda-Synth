@@ -4,7 +4,9 @@ from pathlib import Path
 #You can do the opposite to find very “chill” tracks: sort by mean_T ascending.
 
 def main():
-    data_dir = Path("slakh2100-encodec24k-tension-pt") / "train"
+    #dataset = "slakh2100-encodec24k-tension-pt"
+    dataset = "custom_tracks"
+    data_dir = Path(f"{dataset}") / "train"
     stats = []
 
     for pt_path in sorted(data_dir.glob("train_*.pt")):
@@ -18,7 +20,7 @@ def main():
     # Sort by fraction of high-tension frames, then mean
     stats.sort(key=lambda x: (x[2], x[1]), reverse=True)
 
-    for name, mean_T, frac_high, track_id in stats[:10]:
+    for name, mean_T, frac_high, track_id in stats[:20]:
         print(f"{name}: mean_T={mean_T:.3f}, frac_T>0.8={frac_high:.3f}, track_id={track_id}")
 
 if __name__ == "__main__":
