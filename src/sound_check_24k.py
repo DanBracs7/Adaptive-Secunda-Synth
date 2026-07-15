@@ -28,12 +28,16 @@ def main():
     print(f"Using device: {device}")
 
     sample_numb = "24"
-    data_dir = Path(f"slakh2100-encodec{sample_numb}k-24band-tension-pt") / "train"  # ← CHANGED: added -24band-
-    train = "train_483"
+    folder_name = "custom_tracks"  # ← CHANGED: was "slakh2100-encodec{sample_numb}k-24band-tension-pt"
+    data_dir = Path(f"{folder_name}") / "train"
+    #data_dir = Path(f"slakh2100-encodec{sample_numb}k-24band-tension-pt") / "train"  # ← CHANGED: added -24band-
+    train = "train_017"
     pt_path = data_dir / f"{train}.pt"
     print(f"Loading {pt_path}")
-
-    output_dir = Path(f"output/sound_check{sample_numb}k_24band")           #check here the sav directory
+    # output for customs tracks
+    output_dir = Path(f"output/sound_check{folder_name}")           #check here the sav directory
+    # output for standard slakh2100 dataset
+    #output_dir = Path(f"output/sound_check{sample_numb}k_24band")           #check here the sav directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
     data = torch.load(pt_path, map_location="cpu")

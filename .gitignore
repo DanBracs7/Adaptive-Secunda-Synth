@@ -10,7 +10,7 @@ output/
 slakh2100-encodec32k-tension-pt/
 slakh2100-encodec24k-tension-pt/
 slakh2100-encodec24k-24band-tension-pt/
-
+custom_tracks/
 dataset_artifact.zip
 
 # Wildcard for any zip files to be safe
