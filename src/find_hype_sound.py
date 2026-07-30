@@ -20,7 +20,7 @@ def main():
     # Sort by fraction of high-tension frames, then mean
     stats.sort(key=lambda x: (x[2], x[1]), reverse=True)
 
-    for name, mean_T, frac_high, track_id in stats[:20]:
+    for name, mean_T, frac_high, track_id in stats[:50]:
         print(f"{name}: mean_T={mean_T:.3f}, frac_T>0.8={frac_high:.3f}, track_id={track_id}")
 
 if __name__ == "__main__":
