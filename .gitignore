@@ -15,6 +15,7 @@ dataset_artifact.zip
 zip/
 # Wildcard for any zip files to be safe
 *.zip
+slakh_final_388tensors/
 
 # Python & Jupyter Clutter (Crucial for Master's Projects)
 __pycache__/
