@@ -1,0 +1,8 @@
+{
+  "excluded_files": [
+    {
+      "path": "skyrim/skyrim_000.pt",
+      "reason": "Exact duplicate of skyrim/skyrim_006.pt: From Past to Present"
+    }
+  ]
+}

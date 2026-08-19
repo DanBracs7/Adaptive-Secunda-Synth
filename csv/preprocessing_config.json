@@ -1,0 +1,16 @@
+{
+  "codec": "encodec_model_24khz",
+  "sample_rate": 24000,
+  "channels": 1,
+  "bandwidth_kbps": 24.0,
+  "frame_rate": 75,
+  "combat_window_sec": 5.0,
+  "combat_hop_sec": 1.0,
+  "normalization_source": "/kaggle/input/datasets/danielebracoloni/tesors-slakh-375-checkpoint/norm_stats.json",
+  "skyrim_found": 39,
+  "skyrim_successful": 39,
+  "skyrim_failed": 0,
+  "witcher3_found": 35,
+  "witcher3_successful": 35,
+  "witcher3_failed": 0
+}

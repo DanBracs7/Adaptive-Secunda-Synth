@@ -48,20 +48,20 @@ def main():
     sample_numb = "24"
 
     # Current Slakh checkpoint folder:
-    folder_name = "slakh_final_388tensors/tensors_final"
+    folder_name = "datasets/skyrim"
 
     # Future examples:
     # folder_name = "ost_tensors"
     # folder_name = "skyrim_tensors"
     # folder_name = "witcher_tensors"
 
-    split = "train"
+    split = ""             #train test or ""
     data_dir = Path(folder_name) / split
 
     # Enter a file BASE NAME without .pt.
     # Slakh example: "train_025"
     # Future OST example: "skyrim_004" or "witcher_012"
-    tensor_name = "train_250"
+    tensor_name = "skyrim_006"
 
     pt_path = data_dir / f"{tensor_name}.pt"
 

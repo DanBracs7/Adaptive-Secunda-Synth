@@ -3,8 +3,8 @@ from pathlib import Path
 
 
 # ── Configuration ──
-dataset = "slakh_final_388tensors/tensors_final"
-split = "train"
+dataset = "datasets/skyrim  "
+split = ""    #select train, test or ""
 
 # Works for train_000.pt, skyrim_000.pt, witcher_000.pt, etc.
 file_pattern = "*.pt"
@@ -18,7 +18,7 @@ file_pattern = "*.pt"
 # "low_tension_high_combat"
 sort_mode = "low_tension_high_combat"
 
-top_k = 10
+top_k = 40
 high_threshold = 0.8
 
 
