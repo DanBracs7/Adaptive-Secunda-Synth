@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 
 
-class ConditionalAudioDataset(Dataset):
+class SecundaAudioDataset(Dataset):
     def __init__(
         self,
         manifest_path,

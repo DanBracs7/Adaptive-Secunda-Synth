@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from audio_dataset import ConditionalAudioDataset
+from audio_dataset import SecundaAudioDataset
 from frame_codec import (
     CODEBOOK_SIZE,
     MODEL_VOCAB_SIZE,
@@ -51,7 +51,7 @@ EMBEDDING_DIM = 128
 
 
 def get_loader_batch():
-    dataset = ConditionalAudioDataset(
+    dataset = SecundaAudioDataset(
         manifest_path=MANIFEST_PATH,
         source_roots=SOURCE_ROOTS,
         split="train",

@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from audio_dataset import ConditionalAudioDataset
+from audio_dataset import SecundaAudioDataset
 from frame_codec import (
     CodebookSerializer,
     multi_codebook_cross_entropy,
@@ -38,7 +38,7 @@ FRAME_RATE = 75
 
 
 def get_prepared_batch():
-    dataset = ConditionalAudioDataset(
+    dataset = SecundaAudioDataset(
         manifest_path=MANIFEST_PATH,
         source_roots=SOURCE_ROOTS,
         split="train",

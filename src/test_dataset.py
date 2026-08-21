@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from audio_dataset import ConditionalAudioDataset
+from audio_dataset import SecundaAudioDataset
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ SOURCE_ROOTS = {
 
 
 def test_dataset(split, stage):
-    dataset = ConditionalAudioDataset(
+    dataset = SecundaAudioDataset(
         manifest_path=MANIFEST_PATH,
         source_roots=SOURCE_ROOTS,
         split=split,
