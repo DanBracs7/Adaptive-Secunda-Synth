@@ -41,7 +41,7 @@ class ConditionMLP(nn.Module):
         return self.network(conditions)
 
 
-class DelayedCodebookTransformer(nn.Module):
+class SecundaTransformer(nn.Module):
     def __init__(
         self,
         embedding_dim=128,

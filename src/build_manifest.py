@@ -9,38 +9,51 @@ import torch
 # ── Project paths ─────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-SLAKH_DIR = (
+# Point this at wherever the new dataset version is mounted/extracted.
+SLAKH_TRAIN_DIR = (
     PROJECT_ROOT /
     "datasets" /
-    "slakh_final_388tensors" /
-    "tensors_final" /
+    "slakh_final_800tensors" /
     "train"
+)
+
+SLAKH_TEST_DIR = (
+    PROJECT_ROOT /
+    "datasets" /
+    "slakh_final_800tensors" /
+    "test"
 )
 
 SKYRIM_DIR = PROJECT_ROOT / "datasets" / "skyrim"
 WITCHER_DIR = PROJECT_ROOT / "datasets" / "witcher3"
 
 EXCLUSIONS_PATH = (
-    PROJECT_ROOT /
-    "configs" /
-    "excluded_tensors.json"
+    PROJECT_ROOT / "configs" / "excluded_tensors.json"
 )
 
-OUTPUT_PATH = (
-    PROJECT_ROOT /
-    "manifests" /
-    "all_tracks.csv"
-)
+OUTPUT_PATH = PROJECT_ROOT / "manifests" / "all_tracks.csv"
 
-# ── Deterministic split configuration ─────────────────────────────────
 SPLIT_SEED = 42
 
-VALIDATION_COUNTS = {
-    "slakh": 48,
-    "skyrim": 4,
-    "witcher3": 4,
+# Only sources that need a random train/val split.
+# Slakh's held-out "test" folder is assigned split="test" directly,
+# bypassing this dict entirely.
+VALIDATION_RATIOS = {
+    "slakh": 0.12,
 }
 
+VALIDATION_FIXED_COUNTS = {
+    "skyrim": 6,
+    "witcher3": 6,
+}
+
+
+def resolve_validation_count(source_name, pool_size):
+    if source_name in VALIDATION_FIXED_COUNTS:
+        return VALIDATION_FIXED_COUNTS[source_name]
+
+    ratio = VALIDATION_RATIOS[source_name]
+    return max(1, round(pool_size * ratio))
 
 def load_exclusions():
     if not EXCLUSIONS_PATH.exists():
@@ -84,14 +97,8 @@ def read_tensor_metadata(pt_path):
     data = torch.load(pt_path, map_location="cpu")
 
     required_keys = {
-        "track_id",
-        "duration_sec",
-        "tokens",
-        "tension",
-        "combat_score",
-        "sample_rate",
-        "frame_rate",
-        "bandwidth_kbps",
+        "track_id", "duration_sec", "tokens", "tension",
+        "combat_score", "sample_rate", "frame_rate", "bandwidth_kbps",
     }
 
     missing_keys = required_keys - set(data.keys())
@@ -144,17 +151,21 @@ def stage_for_source(source_name):
     raise ValueError(f"Unknown source: {source_name}")
 
 
+
+
 def assign_splits(rows):
     rows_by_source = {}
 
     for row in rows:
-        if row["split"] == "excluded":
+        if row["split"] != "unassigned":
             continue
 
         rows_by_source.setdefault(row["source"], []).append(row)
 
     for source_name, source_rows in rows_by_source.items():
-        validation_count = VALIDATION_COUNTS[source_name]
+        validation_count = resolve_validation_count(
+            source_name, len(source_rows)
+        )
 
         if validation_count >= len(source_rows):
             raise ValueError(
@@ -168,75 +179,75 @@ def assign_splits(rows):
         rng.shuffle(shuffled_rows)
 
         validation_rows = shuffled_rows[:validation_count]
-
-        validation_paths = {
-            row["path"]
-            for row in validation_rows
-        }
+        validation_paths = {row["path"] for row in validation_rows}
 
         for row in source_rows:
             row["split"] = (
-                "val"
-                if row["path"] in validation_paths
-                else "train"
+                "val" if row["path"] in validation_paths else "train"
             )
-
 
 def build_rows():
     excluded_files = load_exclusions()
 
-    sources = {
-        "slakh": SLAKH_DIR,
+    # sources needing a random train/val split
+    train_pool_sources = {
+        "slakh": SLAKH_TRAIN_DIR,
         "skyrim": SKYRIM_DIR,
         "witcher3": WITCHER_DIR,
     }
 
+    # sources whose tracks are ALWAYS held out as test, never split
+    fixed_test_sources = {
+        "slakh": SLAKH_TEST_DIR,
+    }
+
     rows = []
 
-    for source_name, directory in sources.items():
-        tensor_files = discover_tensor_files(
-            source_name,
-            directory,
-        )
+    def make_row(source_name, pt_path, forced_split=None):
+        manifest_path = get_relative_manifest_path(source_name, pt_path)
+        metadata = read_tensor_metadata(pt_path)
+        exclusion_reason = excluded_files.get(manifest_path)
 
-        for pt_path in tensor_files:
-            manifest_path = get_relative_manifest_path(
-                source_name,
-                pt_path,
+        if exclusion_reason:
+            split = "excluded"
+        elif forced_split is not None:
+            split = forced_split
+        else:
+            split = "unassigned"
+
+        return {
+            "path": manifest_path,
+            "source": source_name,
+            "track_id": metadata["track_id"],
+            "duration_sec": metadata["duration_sec"],
+            "num_codebooks": metadata["num_codebooks"],
+            "num_frames": metadata["num_frames"],
+            "sample_rate": metadata["sample_rate"],
+            "frame_rate": metadata["frame_rate"],
+            "bandwidth_kbps": metadata["bandwidth_kbps"],
+            "split": split,
+            "stage": (
+                "excluded" if exclusion_reason
+                else stage_for_source(source_name)
+            ),
+            "exclusion_reason": exclusion_reason or "",
+        }
+
+    for source_name, directory in train_pool_sources.items():
+        for pt_path in discover_tensor_files(source_name, directory):
+            rows.append(make_row(source_name, pt_path))
+
+    for source_name, directory in fixed_test_sources.items():
+        for pt_path in discover_tensor_files(source_name, directory):
+            # Note: reuses the "slakh" source name so the dataset class
+            # still resolves it via SOURCE_ROOTS["slakh"] at load time,
+            # but the manifest path prefix distinguishes physical folder.
+            rows.append(
+                make_row(source_name, pt_path, forced_split="test")
             )
 
-            metadata = read_tensor_metadata(pt_path)
-
-            exclusion_reason = excluded_files.get(manifest_path)
-
-            row = {
-                "path": manifest_path,
-                "source": source_name,
-                "track_id": metadata["track_id"],
-                "duration_sec": metadata["duration_sec"],
-                "num_codebooks": metadata["num_codebooks"],
-                "num_frames": metadata["num_frames"],
-                "sample_rate": metadata["sample_rate"],
-                "frame_rate": metadata["frame_rate"],
-                "bandwidth_kbps": metadata["bandwidth_kbps"],
-                "split": (
-                    "excluded"
-                    if exclusion_reason
-                    else "unassigned"
-                ),
-                "stage": (
-                    "excluded"
-                    if exclusion_reason
-                    else stage_for_source(source_name)
-                ),
-                "exclusion_reason": exclusion_reason or "",
-            }
-
-            rows.append(row)
-
     unknown_exclusions = set(excluded_files) - {
-        row["path"]
-        for row in rows
+        row["path"] for row in rows
     }
 
     if unknown_exclusions:
@@ -251,16 +262,6 @@ def build_rows():
 
 
 def validate_final_rows(rows):
-    expected_counts = {
-        ("slakh", "train"): 340,
-        ("slakh", "val"): 48,
-        ("skyrim", "train"): 34,
-        ("skyrim", "val"): 4,
-        ("skyrim", "excluded"): 1,
-        ("witcher3", "train"): 31,
-        ("witcher3", "val"): 4,
-    }
-
     observed_counts = {}
 
     for row in rows:
@@ -271,12 +272,31 @@ def validate_final_rows(rows):
     for key in sorted(observed_counts):
         print(f"{key[0]:<9} {key[1]:<9}: {observed_counts[key]}")
 
-    if observed_counts != expected_counts:
-        raise ValueError(
-            "\nUnexpected manifest counts.\n"
-            f"Expected: {expected_counts}\n"
-            f"Observed: {observed_counts}"
-        )
+    total_rows = len(rows)
+    total_usable = sum(
+        count for (_, split), count in observed_counts.items()
+        if split != "excluded"
+    )
+
+    print(f"\nTotal rows: {total_rows}")
+    print(f"Total usable (non-excluded): {total_usable}")
+
+    # Sanity checks instead of hard-coded exact counts.
+    for source_name in VALIDATION_FIXED_COUNTS:
+        expected_val = VALIDATION_FIXED_COUNTS[source_name]
+        observed_val = observed_counts.get((source_name, "val"), 0)
+        if observed_val != expected_val:
+            raise ValueError(
+                f"{source_name}: expected {expected_val} val tracks, "
+                f"got {observed_val}."
+            )
+
+    # Slakh's val count is now ratio-based; just print it, don't hard-assert an exact number.
+    print(
+        f"slakh val count ({VALIDATION_RATIOS['slakh']} ratio):",
+        observed_counts.get(("slakh", "val"), 0),
+    )
+            
 
     for row in rows:
         if row["split"] == "excluded":
@@ -284,20 +304,20 @@ def validate_final_rows(rows):
 
         if row["num_codebooks"] != 32:
             raise ValueError(
-                f"{row['path']} has "
-                f"{row['num_codebooks']} codebooks; expected 32."
+                f"{row['path']} has {row['num_codebooks']} "
+                "codebooks; expected 32."
             )
 
         if row["frame_rate"] != 75:
             raise ValueError(
-                f"{row['path']} has "
-                f"{row['frame_rate']} fps; expected 75."
+                f"{row['path']} has {row['frame_rate']} "
+                "fps; expected 75."
             )
 
         if row["bandwidth_kbps"] != 24.0:
             raise ValueError(
-                f"{row['path']} has "
-                f"{row['bandwidth_kbps']} kbps; expected 24.0."
+                f"{row['path']} has {row['bandwidth_kbps']} "
+                "kbps; expected 24.0."
             )
 
 
@@ -305,31 +325,13 @@ def write_manifest(rows):
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     fieldnames = [
-        "path",
-        "source",
-        "track_id",
-        "duration_sec",
-        "num_codebooks",
-        "num_frames",
-        "sample_rate",
-        "frame_rate",
-        "bandwidth_kbps",
-        "split",
-        "stage",
-        "exclusion_reason",
+        "path", "source", "track_id", "duration_sec", "num_codebooks",
+        "num_frames", "sample_rate", "frame_rate", "bandwidth_kbps",
+        "split", "stage", "exclusion_reason",
     ]
 
-    with open(
-        OUTPUT_PATH,
-        "w",
-        newline="",
-        encoding="utf-8",
-    ) as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fieldnames,
-        )
-
+    with open(OUTPUT_PATH, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
