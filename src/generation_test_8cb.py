@@ -1,5 +1,3 @@
-
-
 !pip install -q encodec
 
 import csv
@@ -24,7 +22,6 @@ if torch.cuda.is_available():
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Change only this checkpoint dataset path if your Kaggle slug differs.
 MANIFEST_PATH = Path(
     "/kaggle/input/datasets/danielebracoloni/"
     "slakh-and-custom-csvs/all_tracks.csv"
@@ -34,10 +31,11 @@ SLAKH_ROOT = Path(
     "tesors-slakh-375-checkpoint/tensors_final/train"
 )
 CHECKPOINT_PATH = Path(
-    "/kaggle/input/datasets/danielebracoloni/secunda-model-v2/secunda_slakh_8cb_448d_14l/secunda_slakh8cb_best_v2.pt"
+    "/kaggle/input/models/danielebracoloni/secunda-model-26checkpoint/pytorch/default/1/secunda_slakh_8cb_448d_14l/secunda_slakh8cb_best_final.pt"
 )
 
-NUM_CODEBOOKS = 8
+NUM_CODEBOOKS_MODEL = 8     # codebooks usati dal modello Secunda
+NUM_CODEBOOKS_CODEC = 32    # codebooks usati da EnCodec
 CODEBOOK_SIZE = 1024
 PAD_TOKEN_ID = CODEBOOK_SIZE
 MODEL_VOCAB_SIZE = CODEBOOK_SIZE + 1
@@ -50,6 +48,8 @@ SAMPLE_RATE = 24_000
 assert MANIFEST_PATH.exists(), MANIFEST_PATH
 assert SLAKH_ROOT.exists(), SLAKH_ROOT
 assert CHECKPOINT_PATH.exists(), CHECKPOINT_PATH
+
+NUM_TEST_TRACKS = 3
 
 class SecundaAudioDataset(Dataset):
     def __init__(
@@ -65,64 +65,42 @@ class SecundaAudioDataset(Dataset):
         samples_per_track=1,
     ):
         self.manifest_path = Path(manifest_path)
-
         self.source_roots = {
             key: Path(value)
             for key, value in source_roots.items()
         }
-
-        self.segment_frames = int(
-            round(segment_seconds * frame_rate)
-        )
+        self.segment_frames = int(round(segment_seconds * frame_rate))
 
         if self.segment_frames < 2:
-            raise ValueError(
-                "segment_seconds must produce at least 2 frames."
-            )
-
+            raise ValueError("segment_seconds must produce at least 2 frames.")
         if samples_per_track < 1:
-            raise ValueError(
-                "samples_per_track must be at least 1."
-            )
+            raise ValueError("samples_per_track must be at least 1.")
 
         self.fixed_start = fixed_start
         self.seed = seed
         self.epoch = 0
         self.samples_per_track = samples_per_track
 
-        with open(
-            self.manifest_path,
-            newline="",
-            encoding="utf-8",
-        ) as file:
+        with open(self.manifest_path, newline="", encoding="utf-8") as file:
             all_rows = list(csv.DictReader(file))
 
         self.rows = [
-            row
-            for row in all_rows
+            row for row in all_rows
             if row["split"] == split
             and row["split"] != "excluded"
-            and (
-                stage is None
-                or row["stage"] == stage
-            )
+            and (stage is None or row["stage"] == stage)
         ]
 
         if not self.rows:
-            raise ValueError(
-                f"No rows found for split={split}, stage={stage}"
-            )
+            raise ValueError(f"No rows found for split={split}, stage={stage}")
 
         self._validate_rows()
 
     def _validate_rows(self):
         for row in self.rows:
             source = row["source"]
-
             if source not in self.source_roots:
-                raise KeyError(
-                    f"No root configured for source={source}"
-                )
+                raise KeyError(f"No root configured for source={source}")
 
             filename = Path(row["path"]).name
             tensor_path = self.source_roots[source] / filename
@@ -130,26 +108,22 @@ class SecundaAudioDataset(Dataset):
             if not tensor_path.exists():
                 raise FileNotFoundError(tensor_path)
 
-            if int(row["num_codebooks"]) != 32:
+            # I tensori hanno 32 codebook; verifichiamo solo che ci siano almeno quelli del modello.
+            declared_nc = int(row["num_codebooks"])
+            if declared_nc < NUM_CODEBOOKS_CODEC:
                 raise ValueError(
-                    f"{tensor_path}: expected 32 codebooks"
+                    f"{tensor_path}: expected at least {NUM_CODEBOOKS_CODEC} codebooks, "
+                    f"got {declared_nc}"
                 )
 
-            if int(row["frame_rate"]) != 75:
-                raise ValueError(
-                    f"{tensor_path}: expected 75 fps"
-                )
-
+            if int(row["frame_rate"]) != FRAME_RATE:
+                raise ValueError(f"{tensor_path}: expected {FRAME_RATE} fps")
             if float(row["bandwidth_kbps"]) != 24.0:
-                raise ValueError(
-                    f"{tensor_path}: expected 24 kbps"
-                )
-
+                raise ValueError(f"{tensor_path}: expected 24 kbps")
             if int(row["num_frames"]) < self.segment_frames:
                 raise ValueError(
-                    f"{tensor_path}: has only "
-                    f"{row['num_frames']} frames, but needs "
-                    f"{self.segment_frames}"
+                    f"{tensor_path}: has only {row['num_frames']} frames, "
+                    f"but needs {self.segment_frames}"
                 )
 
     def set_epoch(self, epoch):
@@ -163,35 +137,21 @@ class SecundaAudioDataset(Dataset):
         filename = Path(row["path"]).name
         return self.source_roots[source] / filename
 
-    def _choose_start(self,row_index,crop_index,total_frames,):
+    def _choose_start(self, row_index, crop_index, total_frames):
         max_start = total_frames - self.segment_frames
-    
         if max_start <= 0:
             return 0
-    
+
         if self.fixed_start:
-            # Validation:
-            # same interior crop for this validation track every epoch.
-            # It is deterministic, but not forced to begin at frame 0.
             generator = random.Random(
-                self.seed
-                + 99_999_937
-                + row_index * 10_000
-                + crop_index
+                self.seed + 99_999_937 + row_index * 10_000 + crop_index
             )
         else:
-            # Training:
-            # deterministic but changes with epoch.
             generator = random.Random(
-                self.seed
-                + self.epoch * 1_000_000
-                + row_index * 10_000
-                + crop_index
+                self.seed + self.epoch * 1_000_000 + row_index * 10_000 + crop_index
             )
-    
+
         return generator.randint(0, max_start)
-
-
 
     def __getitem__(self, index):
         row_index = index // self.samples_per_track
@@ -200,42 +160,32 @@ class SecundaAudioDataset(Dataset):
         row = self.rows[row_index]
         tensor_path = self._path_for_row(row)
 
-        data = torch.load(
-            tensor_path,
-            map_location="cpu",
-        )
+        data = torch.load(tensor_path, map_location="cpu")
 
-        tokens = data["tokens"].long()
+        tokens_full = data["tokens"].long()  # [32, T]
         tension = data["tension"].float()
         combat_score = data["combat_score"].float()
 
-        if tokens.ndim != 2:
-            raise ValueError(
-                f"{tensor_path}: tokens must be [n_q, T]"
-            )
+        if tokens_full.ndim != 2:
+            raise ValueError(f"{tensor_path}: tokens must be [n_q, T]")
 
-        total_frames = tokens.shape[-1]
+        total_frames = tokens_full.shape[-1]
 
         if total_frames != len(tension):
-            raise ValueError(
-                f"{tensor_path}: tokens/tension mismatch"
-            )
-
+            raise ValueError(f"{tensor_path}: tokens/tension mismatch")
         if total_frames != len(combat_score):
-            raise ValueError(
-                f"{tensor_path}: tokens/combat mismatch"
-            )
+            raise ValueError(f"{tensor_path}: tokens/combat mismatch")
 
-        start = self._choose_start(
-            row_index=row_index,
-            crop_index=crop_index,
-            total_frames=total_frames,
-        )
+        # Model uses only the first 8 codebooks; codec will use all 32.
+        tokens_model = tokens_full[:NUM_CODEBOOKS_MODEL]
+        tokens_codec = tokens_full  # [32, T]
 
+        start = self._choose_start(row_index, crop_index, total_frames)
         end = start + self.segment_frames
 
         return {
-            "tokens": tokens[:NUM_CODEBOOKS, start:end],
+            "tokens_model": tokens_model[:, start:end],   # [8, 750]
+            "tokens_codec": tokens_codec[:, start:end],  # [32, 750]
             "tension": tension[start:end],
             "combat_score": combat_score[start:end],
             "source": row["source"],
@@ -244,7 +194,7 @@ class SecundaAudioDataset(Dataset):
             "start_frame": start,
             "crop_index": crop_index,
         }
-            
+
 
 class CodebookSerializer:
     def __init__(self, numcodebooks=8, codebooksize=1024, padtokenid=1024):
@@ -276,6 +226,7 @@ class CodebookSerializer:
             raise ValueError("Undelayed codes contain PAD/invalid IDs")
         return out
 
+
 def delay_conditions(tension, combat, num_codebooks=8):
     b, t = tension.shape
     dt = t + num_codebooks - 1
@@ -288,12 +239,13 @@ def delay_conditions(tension, combat, num_codebooks=8):
         valid[:, q, q:q+t] = True
     return tension_d, combat_d, valid
 
+
 def prepare_batch(batch, serializer):
     tokens = batch["tokens"].long()
     tension = batch["tension"].float()
     combat = batch["combat_score"].float()
     delayed = serializer.delay(tokens)
-    td, cd, valid = delay_conditions(tension,combat,NUM_CODEBOOKS,)
+    td, cd, valid = delay_conditions(tension, combat, serializer.numcodebooks)
     return {
         "inputcodes": delayed[:, :, :-1],
         "targetcodes": delayed[:, :, 1:],
@@ -304,6 +256,7 @@ def prepare_batch(batch, serializer):
         "targetmask": valid[:, :, 1:],
     }
 
+
 class ConditionMLP(nn.Module):
     def __init__(self, inputdim, hiddendim, outputdim):
         super().__init__()
@@ -312,6 +265,7 @@ class ConditionMLP(nn.Module):
         )
     def forward(self, tension, combat):
         return self.network(torch.stack([tension, combat], dim=-1))
+
 
 class FrameCodebookEmbedding(nn.Module):
     def __init__(self, embeddingdim, numcodebooks, codebooksize, padtokenid):
@@ -324,6 +278,7 @@ class FrameCodebookEmbedding(nn.Module):
     def forward(self, codes):
         values = [emb(codes[:, q]) for q, emb in enumerate(self.embeddings)]
         return torch.stack(values, dim=2).sum(dim=2) / math.sqrt(self.numcodebooks)
+
 
 class SecundaTransformer(nn.Module):
     def __init__(self, embeddingdim, numlayers, numheads, feedforwarddim,
@@ -363,34 +318,37 @@ class SecundaTransformer(nn.Module):
             outputs.append(self.outputheads[codebook](hidden * (1 + gamma) + beta))
         return torch.stack(outputs, dim=1)
 
-def decode_codes(codes, path):
+
+def decode_codes_32cb(codes_32, path):
     """
-    codes: [B, Q, T] integer EnCodec IDs, with values 0..1023.
-    Decodes only the first item in the batch.
+    codes_32: [B, 32, T] or [32, T] integer EnCodec IDs (0..1023).
+    Decodes only the first item in the batch using the segmented decode API,
+    which is more robust across encodec versions on Kaggle.
     """
-    codes = codes[:1].long().to(device)  # [1, 8, T]
+    if codes_32.ndim == 3:
+        if codes_32.shape[0] != 1:
+            raise ValueError(f"Expected [1, 32, T], got {tuple(codes_32.shape)}")
+        codes_32 = codes_32[0]
 
-    assert codes.ndim == 3, (
-        f"Expected [B, Q, T], got {tuple(codes.shape)}"
-    )
-    assert codes.shape[1] == NUM_CODEBOOKS, (
-        f"Expected {NUM_CODEBOOKS} codebooks, got {codes.shape[1]}"
-    )
-    assert int(codes.min()) >= 0
-    assert int(codes.max()) < CODEBOOK_SIZE
+    if codes_32.ndim != 2:
+        raise ValueError(f"Expected [32, T], got {tuple(codes_32.shape)}")
+    if codes_32.shape[0] != NUM_CODEBOOKS_CODEC:
+        raise ValueError(f"Expected {NUM_CODEBOOKS_CODEC} codebooks, got {codes_32.shape[0]}")
+    if int(codes_32.min()) < 0 or int(codes_32.max()) >= CODEBOOK_SIZE:
+        raise ValueError(f"EnCodec IDs must be in [0, {CODEBOOK_SIZE - 1}]")
 
-    # EnCodec expects a list of `(codes, scale)` frames.
-    # `scale=None` is correct for non-segmented / normal EnCodec decoding.
-    encoded_frames = [
-        (codes, None),
-    ]
+    codes_32 = codes_32.long().to(device)  # [32, T]
 
+    # Add batch dimension for encodec: [1, 32, T]
+    codes_32 = codes_32.unsqueeze(0)
+
+    # Use the segmented decode API, which expects a list of (codes, scales) frames.
+    # We pass a single frame covering the whole segment.
     with torch.inference_mode():
-        decoded = codec.decode(encoded_frames)
+        # This pattern matches what worked in your old notebooks.
+        decoded = codec.decode([(codes_32, None)])
 
-    # Decoded shape is normally [B, channels, samples].
     audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
-
     peak = float(np.max(np.abs(audio)))
     if peak > 0:
         audio = audio / peak * 0.98
@@ -398,7 +356,10 @@ def decode_codes(codes, path):
     wav_write(path, SAMPLE_RATE, audio)
     return audio
 
-# Load checkpoint and instantiate from its saved configuration.
+
+# ---------------------------
+# Load checkpoint
+# ---------------------------
 checkpoint = torch.load(CHECKPOINT_PATH, map_location="cpu")
 cfg = checkpoint.get("config", {})
 print("Checkpoint epoch:", checkpoint.get("epoch"))
@@ -425,14 +386,12 @@ model = SecundaTransformer(
     feedforwarddim=cfg["feedforward_dim"],
     dropout=cfg["dropout"],
     maxsequencelength=cfg["max_sequence_length"],
-    numcodebooks=8,
-    codebooksize=1024,
-    padtokenid=1024,
+    numcodebooks=NUM_CODEBOOKS_MODEL,
+    codebooksize=CODEBOOK_SIZE,
+    padtokenid=PAD_TOKEN_ID,
 ).to(device)
-checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
-state = checkpoint["model_state_dict"]
 
-# Map old names (with underscores) to your current class names (without underscores).
+state = checkpoint["model_state_dict"]
 renamed_state = {}
 for k, v in state.items():
     new_k = (
@@ -447,37 +406,52 @@ for k, v in state.items():
 
 model.load_state_dict(renamed_state, strict=True)
 model.eval()
-
 print("Loaded parameters:", f"{sum(p.numel() for p in model.parameters()):,}")
-# Held-out Slakh validation crop.
+
+# ---------------------------
+# Dataset & sampling
+# ---------------------------
 dataset = SecundaAudioDataset(
-    MANIFEST_PATH, {"slakh": SLAKH_ROOT}, split="val", stage="pretrain",
-    segment_seconds=10.0, frame_rate=75, fixed_start=True, samples_per_track=1
+    MANIFEST_PATH,
+    {"slakh": SLAKH_ROOT},
+    split="val",
+    stage="pretrain",
+    segment_seconds=10.0,
+    frame_rate=75,
+    fixed_start=True,
+    seed=SEED,
+    samples_per_track=1,
 )
-NUM_TEST_TRACKS = 3
 
 random.seed(SEED)
-sample_indices = random.sample(range(len(dataset)), k=NUM_TEST_TRACKS)
+sample_indices = random.sample(range(len(dataset)), k=min(NUM_TEST_TRACKS, len(dataset)))
 
-serializer = CodebookSerializer()
+serializer = CodebookSerializer(numcodebooks=NUM_CODEBOOKS_MODEL)
 
+# ---------------------------
+# Codec
+# ---------------------------
+codec = EncodecModel.encodec_model_24khz().to(device)
+codec.set_target_bandwidth(24.0)
+codec.eval()
+
+# ---------------------------
+# Inference loop
+# ---------------------------
 from IPython.display import Audio, display
 
 for rank, sample_index in enumerate(sample_indices, start=1):
     item = dataset[sample_index]
 
+    # Batch per il modello (8 codebook)
     batch = {
-        "tokens": item["tokens"].unsqueeze(0),
+        "tokens": item["tokens_model"].unsqueeze(0),      # [1, 8, 750]
         "tension": item["tension"].unsqueeze(0),
         "combat_score": item["combat_score"].unsqueeze(0),
     }
 
     prepared = prepare_batch(batch, serializer)
-    prepared = {
-        k: v.to(device)
-        for k, v in prepared.items()
-        if torch.is_tensor(v)
-    }
+    prepared = {k: v.to(device) for k, v in prepared.items() if torch.is_tensor(v)}
 
     with torch.inference_mode():
         logits = model(
@@ -491,24 +465,19 @@ for rank, sample_index in enumerate(sample_indices, start=1):
     predicted_delayed = logits.argmax(dim=-1)
 
     known_final = prepared["targetcodes"][:, :, -1:].clone()
-    full_predicted_delayed = torch.cat(
-        [predicted_delayed, known_final],
-        dim=-1,
-    )
+    full_predicted_delayed = torch.cat([predicted_delayed, known_final], dim=-1)
+    predicted_8cb = serializer.undelay(full_predicted_delayed)  # [1, 8, 750]
 
-    predicted_codes = serializer.undelay(full_predicted_delayed)
-    target_codes = batch["tokens"].long().to(device)
-
-    assert predicted_codes.shape == target_codes.shape, (
-        f"Shape mismatch: predicted={tuple(predicted_codes.shape)}, "
-        f"target={tuple(target_codes.shape)}"
-    )
+    # Ricostruisci tensori a 32 codebook per EnCodec:
+    target_32cb = item["tokens_codec"].unsqueeze(0)  # [1, 32, 750]
+    pred_32cb = target_32cb.clone()
+    pred_32cb[:, :NUM_CODEBOOKS_MODEL, :] = predicted_8cb
 
     pred_path = f"/kaggle/working/slakh_predicted_track{rank}.wav"
     true_path = f"/kaggle/working/slakh_ground_truth_track{rank}.wav"
 
-    pred_audio = decode_codes(predicted_codes, pred_path)
-    true_audio = decode_codes(target_codes, true_path)
+    pred_audio = decode_codes_32cb(pred_32cb, pred_path)
+    true_audio = decode_codes_32cb(target_32cb, true_path)
 
     print(
         f"\nTrack {rank} | "
@@ -517,10 +486,8 @@ for rank, sample_index in enumerate(sample_indices, start=1):
     )
     print("Wrote WAV files:", pred_audio.shape, true_audio.shape)
 
-    print("Ground truth:")
+    print("Ground truth (32cb EnCodec):")
     display(Audio(true_path))
 
-    print("Predicted (teacher-forced):")
+    print("Predicted (8cb model + 32cb EnCodec, first 8cb replaced):")
     display(Audio(pred_path))
-
-
