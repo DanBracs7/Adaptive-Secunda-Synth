@@ -108,7 +108,6 @@ class SecundaAudioDataset(Dataset):
             if not tensor_path.exists():
                 raise FileNotFoundError(tensor_path)
 
-            # I tensori hanno 32 codebook; verifichiamo solo che ci siano almeno quelli del modello.
             declared_nc = int(row["num_codebooks"])
             if declared_nc < NUM_CODEBOOKS_CODEC:
                 raise ValueError(
@@ -176,7 +175,6 @@ class SecundaAudioDataset(Dataset):
         if total_frames != len(combat_score):
             raise ValueError(f"{tensor_path}: tokens/combat mismatch")
 
-        # Model uses only the first 8 codebooks; codec will use all 32.
         tokens_model = tokens_full[:NUM_CODEBOOKS_MODEL]
         tokens_codec = tokens_full  # [32, T]
 
@@ -320,11 +318,6 @@ class SecundaTransformer(nn.Module):
 
 
 def decode_codes_32cb(codes_32, path):
-    """
-    codes_32: [B, 32, T] or [32, T] integer EnCodec IDs (0..1023).
-    Decodes only the first item in the batch using the segmented decode API,
-    which is more robust across encodec versions on Kaggle.
-    """
     if codes_32.ndim == 3:
         if codes_32.shape[0] != 1:
             raise ValueError(f"Expected [1, 32, T], got {tuple(codes_32.shape)}")
@@ -338,15 +331,41 @@ def decode_codes_32cb(codes_32, path):
         raise ValueError(f"EnCodec IDs must be in [0, {CODEBOOK_SIZE - 1}]")
 
     codes_32 = codes_32.long().to(device)  # [32, T]
+    codes_32 = codes_32.unsqueeze(0)       # [1, 32, T]
 
-    # Add batch dimension for encodec: [1, 32, T]
-    codes_32 = codes_32.unsqueeze(0)
-
-    # Use the segmented decode API, which expects a list of (codes, scales) frames.
-    # We pass a single frame covering the whole segment.
     with torch.inference_mode():
-        # This pattern matches what worked in your old notebooks.
         decoded = codec.decode([(codes_32, None)])
+
+    audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
+    peak = float(np.max(np.abs(audio)))
+    if peak > 0:
+        audio = audio / peak * 0.98
+
+    wav_write(path, SAMPLE_RATE, audio)
+    return audio
+
+def decode_codes_8cb(codes_8, path):
+    """
+    codes_8: [1, 8, T] integer EnCodec IDs (0..1023).
+    Decodes using only 8 codebooks (lower bitrate, less detail).
+    """
+    if codes_8.ndim == 3:
+        if codes_8.shape[0] != 1:
+            raise ValueError(f"Expected [1, 8, T], got {tuple(codes_8.shape)}")
+        codes_8 = codes_8[0]
+
+    if codes_8.ndim != 2:
+        raise ValueError(f"Expected [8, T], got {tuple(codes_8.shape)}")
+    if codes_8.shape[0] != NUM_CODEBOOKS_MODEL:
+        raise ValueError(f"Expected {NUM_CODEBOOKS_MODEL} codebooks, got {codes_8.shape[0]}")
+    if int(codes_8.min()) < 0 or int(codes_8.max()) >= CODEBOOK_SIZE:
+        raise ValueError(f"EnCodec IDs must be in [0, {CODEBOOK_SIZE - 1}]")
+
+    codes_8 = codes_8.long().to(device)  # [8, T]
+    codes_8 = codes_8.unsqueeze(0)       # [1, 8, T]
+
+    with torch.inference_mode():
+        decoded = codec.decode([(codes_8, None)])
 
     audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
     peak = float(np.max(np.abs(audio)))
@@ -436,14 +455,13 @@ codec.set_target_bandwidth(24.0)
 codec.eval()
 
 # ---------------------------
-# Inference loop
+# Inference loop (3 versioni: GT 32cb, GT 8cb-only, Predicted)
 # ---------------------------
 from IPython.display import Audio, display
 
 for rank, sample_index in enumerate(sample_indices, start=1):
     item = dataset[sample_index]
 
-    # Batch per il modello (8 codebook)
     batch = {
         "tokens": item["tokens_model"].unsqueeze(0),      # [1, 8, 750]
         "tension": item["tension"].unsqueeze(0),
@@ -468,26 +486,41 @@ for rank, sample_index in enumerate(sample_indices, start=1):
     full_predicted_delayed = torch.cat([predicted_delayed, known_final], dim=-1)
     predicted_8cb = serializer.undelay(full_predicted_delayed)  # [1, 8, 750]
 
-    # Ricostruisci tensori a 32 codebook per EnCodec:
+    # 1) GT con tutti e 32 codebook
     target_32cb = item["tokens_codec"].unsqueeze(0)  # [1, 32, 750]
+
+    # 2) GT “troncato” a 8 codebook (per sentire il limite 8cb)
+    tokens_8cb_gt = item["tokens_codec"][:NUM_CODEBOOKS_MODEL].unsqueeze(0)  # [1, 8, 750]
+
+    # 3) Predicted: 8cb modello + 24cb GT
     pred_32cb = target_32cb.clone()
     pred_32cb[:, :NUM_CODEBOOKS_MODEL, :] = predicted_8cb
 
+    # Paths
+    gt_32_path = f"/kaggle/working/slakh_gt_32cb_track{rank}.wav"
+    gt_8cb_path = f"/kaggle/working/slakh_gt_8cb_track{rank}.wav"
     pred_path = f"/kaggle/working/slakh_predicted_track{rank}.wav"
-    true_path = f"/kaggle/working/slakh_ground_truth_track{rank}.wav"
 
+    # Decode
+    gt_32_audio = decode_codes_32cb(target_32cb, gt_32_path)
+    gt_8cb_audio = decode_codes_8cb(tokens_8cb_gt, gt_8cb_path)
     pred_audio = decode_codes_32cb(pred_32cb, pred_path)
-    true_audio = decode_codes_32cb(target_32cb, true_path)
 
     print(
         f"\nTrack {rank} | "
         f"track_id={item['track_id']} | "
         f"start_frame={item['start_frame']}"
     )
-    print("Wrote WAV files:", pred_audio.shape, true_audio.shape)
+    print("Wrote WAV files:")
+    print("  GT 32cb:", gt_32_audio.shape, "->", gt_32_path)
+    print("  GT 8cb:", gt_8cb_audio.shape, "->", gt_8cb_path)
+    print("  Pred:", pred_audio.shape, "->", pred_path)
 
-    print("Ground truth (32cb EnCodec):")
-    display(Audio(true_path))
+    print("\nGround truth (32cb EnCodec):")
+    display(Audio(gt_32_path))
 
-    print("Predicted (8cb model + 32cb EnCodec, first 8cb replaced):")
+    print("\nGround truth (8cb-only, limite 8 codebook):")
+    display(Audio(gt_8cb_path))
+
+    print("\nPredicted (8cb model + 32cb EnCodec, first 8cb replaced):")
     display(Audio(pred_path))
