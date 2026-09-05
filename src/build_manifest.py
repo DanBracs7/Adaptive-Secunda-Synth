@@ -13,14 +13,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SLAKH_TRAIN_DIR = (
     PROJECT_ROOT /
     "datasets" /
-    "slakh_final_800tensors" /
+    "slakh_final_1070_tensors" /
     "train"
 )
 
 SLAKH_TEST_DIR = (
     PROJECT_ROOT /
     "datasets" /
-    "slakh_final_800tensors" /
+    "slakh_final_1070_tensors" /
     "test"
 )
 
@@ -45,6 +45,7 @@ VALIDATION_RATIOS = {
 VALIDATION_FIXED_COUNTS = {
     "skyrim": 6,
     "witcher3": 6,
+    "slakh": 35,
 }
 
 
