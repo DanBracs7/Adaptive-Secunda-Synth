@@ -9,18 +9,18 @@ import torch
 # ── Project paths ─────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Point this at wherever the new dataset version is mounted/extracted.
+# New combined dataset (1,395 Slakh train tensors)
 SLAKH_TRAIN_DIR = (
     PROJECT_ROOT /
     "datasets" /
-    "slakh_final_1070_tensors" /
+    "slakh_final_1395_tensors" /
     "train"
 )
 
 SLAKH_TEST_DIR = (
     PROJECT_ROOT /
     "datasets" /
-    "slakh_final_1070_tensors" /
+    "slakh_final_1395_tensors" /
     "test"
 )
 
@@ -33,6 +33,13 @@ EXCLUSIONS_PATH = (
 
 OUTPUT_PATH = PROJECT_ROOT / "manifests" / "all_tracks.csv"
 
+# Previous manifest that already has the correct 1,035/35 Slakh split
+PREVIOUS_MANIFEST_PATH = (
+    PROJECT_ROOT /
+    "manifests" /
+    "all_tracks_800.csv"
+)
+
 SPLIT_SEED = 42
 
 # Only sources that need a random train/val split.
@@ -41,13 +48,12 @@ SPLIT_SEED = 42
 VALIDATION_RATIOS = {
     "slakh": 0.12,
 }
-
 VALIDATION_FIXED_COUNTS = {
     "skyrim": 6,
     "witcher3": 6,
-    "slakh": 35,
 }
 
+SLAKH_NEW_VALIDATION_COUNT = 35
 
 def resolve_validation_count(source_name, pool_size):
     if source_name in VALIDATION_FIXED_COUNTS:
@@ -55,6 +61,7 @@ def resolve_validation_count(source_name, pool_size):
 
     ratio = VALIDATION_RATIOS[source_name]
     return max(1, round(pool_size * ratio))
+
 
 def load_exclusions():
     if not EXCLUSIONS_PATH.exists():
@@ -152,9 +159,37 @@ def stage_for_source(source_name):
     raise ValueError(f"Unknown source: {source_name}")
 
 
+def load_previous_slakh_splits():
+    """
+    Load split assignments (train/val) for Slakh tracks from the previous manifest.
+    Returns a dict: {path: split} for Slakh rows with split in {train, val}.
+    Returns None if the previous manifest does not exist.
+    """
+    if not PREVIOUS_MANIFEST_PATH.exists():
+        return None
+
+    previous_rows = []
+    with open(PREVIOUS_MANIFEST_PATH, newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row["source"] != "slakh":
+                continue
+            if row["split"] in ("train", "val"):
+                previous_rows.append(row)
+
+    return {row["path"]: row["split"] for row in previous_rows}
 
 
 def assign_splits(rows):
+    """
+    Assign train/val splits to unassigned rows.
+
+    Old Slakh assignments from all_tracks_800.csv are already frozen.
+    New Slakh tracks are split separately so each added block contributes
+    35 validation tracks:
+      - train_800.pt to train_1069.pt
+      - train_1070.pt to train_1394.pt
+    """
     rows_by_source = {}
 
     for row in rows:
@@ -164,6 +199,51 @@ def assign_splits(rows):
         rows_by_source.setdefault(row["source"], []).append(row)
 
     for source_name, source_rows in rows_by_source.items():
+        if source_name == "slakh":
+            slakh_rows_800_to_1069 = []
+            slakh_rows_1070_to_1394 = []
+
+            for row in source_rows:
+                file_name = Path(row["path"]).name
+                track_number = int(file_name.replace("train_", "").replace(".pt", ""))
+
+                if 800 <= track_number <= 1069:
+                    slakh_rows_800_to_1069.append(row)
+                elif 1070 <= track_number <= 1394:
+                    slakh_rows_1070_to_1394.append(row)
+                else:
+                    raise ValueError(
+                        f"Unexpected unassigned Slakh track: {row['path']}"
+                    )
+
+            slakh_groups = {
+                "800_to_1069": slakh_rows_800_to_1069,
+                "1070_to_1394": slakh_rows_1070_to_1394,
+            }
+
+            for group_name, group_rows in slakh_groups.items():
+                if len(group_rows) < SLAKH_NEW_VALIDATION_COUNT:
+                    raise ValueError(
+                        f"Slakh group {group_name} has only {len(group_rows)} tracks; "
+                        f"cannot reserve {SLAKH_NEW_VALIDATION_COUNT} for validation."
+                    )
+
+                rng = random.Random(f"{SPLIT_SEED}_{group_name}")
+                shuffled_rows = group_rows.copy()
+                rng.shuffle(shuffled_rows)
+
+                validation_paths = {
+                    row["path"]
+                    for row in shuffled_rows[:SLAKH_NEW_VALIDATION_COUNT]
+                }
+
+                for row in group_rows:
+                    row["split"] = (
+                        "val" if row["path"] in validation_paths else "train"
+                    )
+
+            continue
+
         validation_count = resolve_validation_count(
             source_name, len(source_rows)
         )
@@ -179,8 +259,10 @@ def assign_splits(rows):
         shuffled_rows = source_rows.copy()
         rng.shuffle(shuffled_rows)
 
-        validation_rows = shuffled_rows[:validation_count]
-        validation_paths = {row["path"] for row in validation_rows}
+        validation_paths = {
+            row["path"]
+            for row in shuffled_rows[:validation_count]
+        }
 
         for row in source_rows:
             row["split"] = (
@@ -189,6 +271,9 @@ def assign_splits(rows):
 
 def build_rows():
     excluded_files = load_exclusions()
+
+    # Load previous Slakh splits to freeze them
+    previous_slakh_splits = load_previous_slakh_splits()
 
     # sources needing a random train/val split
     train_pool_sources = {
@@ -216,7 +301,7 @@ def build_rows():
         else:
             split = "unassigned"
 
-        return {
+        row = {
             "path": manifest_path,
             "source": source_name,
             "track_id": metadata["track_id"],
@@ -233,6 +318,16 @@ def build_rows():
             ),
             "exclusion_reason": exclusion_reason or "",
         }
+
+        # Freeze old Slakh train/val splits from the previous manifest
+        if (
+            source_name == "slakh" and
+            previous_slakh_splits is not None and
+            manifest_path in previous_slakh_splits
+        ):
+            row["split"] = previous_slakh_splits[manifest_path]
+
+        return row
 
     for source_name, directory in train_pool_sources.items():
         for pt_path in discover_tensor_files(source_name, directory):
@@ -283,21 +378,37 @@ def validate_final_rows(rows):
     print(f"Total usable (non-excluded): {total_usable}")
 
     # Sanity checks instead of hard-coded exact counts.
-    for source_name in VALIDATION_FIXED_COUNTS:
+    # Skyrim and Witcher validation counts are fixed totals.
+    for source_name in ("skyrim", "witcher3"):
         expected_val = VALIDATION_FIXED_COUNTS[source_name]
         observed_val = observed_counts.get((source_name, "val"), 0)
+
         if observed_val != expected_val:
             raise ValueError(
                 f"{source_name}: expected {expected_val} val tracks, "
                 f"got {observed_val}."
             )
 
-    # Slakh's val count is now ratio-based; just print it, don't hard-assert an exact number.
+        # Slakh validation tracks consist of:
+    # - 96 frozen validation tracks from all_tracks_800.csv
+    # - 35 new validation tracks from train_800.pt to train_1069.pt
+    # - 35 new validation tracks from train_1070.pt to train_1394.pt
+    expected_slakh_val = 166
+    observed_slakh_val = observed_counts.get(("slakh", "val"), 0)
+
+    if observed_slakh_val != expected_slakh_val:
+        raise ValueError(
+            f"slakh: expected {expected_slakh_val} total validation tracks, "
+            f"got {observed_slakh_val}."
+        )
+
     print(
-        f"slakh val count ({VALIDATION_RATIOS['slakh']} ratio):",
-        observed_counts.get(("slakh", "val"), 0),
+        "slakh validation tracks:",
+        observed_slakh_val,
+        "(96 frozen from all_tracks_800.csv + "
+        "35 from train_800.pt–train_1069.pt + "
+        "35 from train_1070.pt–train_1394.pt)",
     )
-            
 
     for row in rows:
         if row["split"] == "excluded":
