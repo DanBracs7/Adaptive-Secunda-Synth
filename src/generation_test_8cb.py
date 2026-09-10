@@ -1,18 +1,19 @@
-!pip install -q encodec
+#!pip install -q encodec
+#NOTE this script is designed to run in a Kaggle notebook environment. It generates audio from scratch using a fine-tuned Secunda model on the Slakh dataset, with various conditioning profiles for tension and combat. The generated audio is saved as WAV files and displayed for playback.
+#It is not ready to run in a local environment without modifications, as it relies on specific paths and dependencies available in the Kaggle environment.
+#It is also for notebook execution, not for direct script execution. It is intended to be run in a Kaggle notebook cell.
 
-import csv
+
+
 import math
 import random
 from pathlib import Path
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from scipy.io import wavfile
-from torch.utils.data import Dataset, DataLoader
-from encodec import EncodecModel
 from scipy.io.wavfile import write as wav_write
+from encodec import EncodecModel
 
 SEED = 42
 random.seed(SEED)
@@ -22,239 +23,115 @@ if torch.cuda.is_available():
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-MANIFEST_PATH = Path(
-    "/kaggle/input/datasets/danielebracoloni/"
-    "slakh-and-custom-csvs/all_tracks.csv"
-)
-SLAKH_ROOT = Path(
-    "/kaggle/input/datasets/danielebracoloni/"
-    "tesors-slakh-375-checkpoint/tensors_final/train"
-)
+# ── Paths ──
 CHECKPOINT_PATH = Path(
-    "/kaggle/input/models/danielebracoloni/secunda-model-26checkpoint/pytorch/default/1/secunda_slakh_8cb_448d_14l/secunda_slakh8cb_best_final.pt"
+    "/kaggle/input/models/danielebracoloni/secunda-finetuned-on-ost/pytorch/default/1/secunda_slakh8cb_finetune_best.pt"
+)
+PROMPT_TENSOR_PATH = Path(
+    "/kaggle/input/datasets/danielebracoloni/slakh-tensors-final/train/train_367.pt"
 )
 
-NUM_CODEBOOKS_MODEL = 8     # codebooks usati dal modello Secunda
-NUM_CODEBOOKS_CODEC = 32    # codebooks usati da EnCodec
+# ── Model constants (must match training) ──
+NUM_CODEBOOKS_MODEL = 8
+NUM_CODEBOOKS_CODEC = 32
 CODEBOOK_SIZE = 1024
 PAD_TOKEN_ID = CODEBOOK_SIZE
 MODEL_VOCAB_SIZE = CODEBOOK_SIZE + 1
 FRAME_RATE = 75
 SEGMENT_SECONDS = 10.0
-SEGMENT_FRAMES = int(SEGMENT_SECONDS * FRAME_RATE)
+SEGMENT_FRAMES = int(SEGMENT_SECONDS * FRAME_RATE)  # 750
 MAX_SEQUENCE_LENGTH = 1024
 SAMPLE_RATE = 24_000
 
-assert MANIFEST_PATH.exists(), MANIFEST_PATH
-assert SLAKH_ROOT.exists(), SLAKH_ROOT
-assert CHECKPOINT_PATH.exists(), CHECKPOINT_PATH
 
-NUM_TEST_TRACKS = 3
+# ── Conditioning profiles (duration = SEGMENT_SECONDS) ──
 
-class SecundaAudioDataset(Dataset):
-    def __init__(
-        self,
-        manifest_path,
-        source_roots,
-        split="train",
-        stage=None,
-        segment_seconds=5.0,
-        frame_rate=75,
-        fixed_start=False,
-        seed=42,
-        samples_per_track=1,
-    ):
-        self.manifest_path = Path(manifest_path)
-        self.source_roots = {
-            key: Path(value)
-            for key, value in source_roots.items()
-        }
-        self.segment_frames = int(round(segment_seconds * frame_rate))
+def apply_jitter(base_val, t, noise_std=0.5):
+    # Creates a tensor of base_val and adds frame-by-frame Gaussian noise
+    base_tensor = torch.full_like(t, base_val)
+    noise = torch.randn_like(t) * noise_std
+    # Clamp to ensure scores don't drop below 0
+    return torch.clamp(base_tensor + noise, min=0.0)
 
-        if self.segment_frames < 2:
-            raise ValueError("segment_seconds must produce at least 2 frames.")
-        if samples_per_track < 1:
-            raise ValueError("samples_per_track must be at least 1.")
+def profile_low(t):
+    tension_base = random.uniform(0.0, 4.0)
+    combat_base = random.uniform(0.0, 4.0)
+    return apply_jitter(tension_base, t), apply_jitter(combat_base, t)
 
-        self.fixed_start = fixed_start
-        self.seed = seed
-        self.epoch = 0
-        self.samples_per_track = samples_per_track
+def profile_high(t):
+    tension_base = random.uniform(6.0, 9.0)
+    combat_base = random.uniform(6.0, 9.0)
+    return apply_jitter(tension_base, t), apply_jitter(combat_base, t)
 
-        with open(self.manifest_path, newline="", encoding="utf-8") as file:
-            all_rows = list(csv.DictReader(file))
+def profile_ramp(t):
+    T = t.shape[0]
+    alpha = torch.linspace(0.0, 1.0, T, device=t.device)
+    
+    # Ramp from a random low base to a random high base
+    tension_low = random.uniform(0.0, 3.0)
+    tension_high = random.uniform(7.0, 9.0)
+    combat_low = random.uniform(0.0, 3.0)
+    combat_high = random.uniform(7.0, 9.0)
+    
+    tension = tension_low + (tension_high - tension_low) * alpha
+    combat  = combat_low  + (combat_high  - combat_low)  * alpha
+    
+    # Add frame-by-frame noise on top of the ramp
+    noise_t = torch.randn_like(t) * 0.5
+    noise_c = torch.randn_like(t) * 0.5
+    
+    return torch.clamp(tension + noise_t, min=0.0), torch.clamp(combat + noise_c, min=0.0)
 
-        self.rows = [
-            row for row in all_rows
-            if row["split"] == split
-            and row["split"] != "excluded"
-            and (stage is None or row["stage"] == stage)
-        ]
+def profile_lowT_highC(t):
+    tension_base = random.uniform(0.0, 4.0)
+    combat_base = random.uniform(6.0, 9.0)
+    return apply_jitter(tension_base, t), apply_jitter(combat_base, t)
 
-        if not self.rows:
-            raise ValueError(f"No rows found for split={split}, stage={stage}")
+def profile_highT_lowC(t):
+    tension_base = random.uniform(6.0, 9.0)
+    combat_base = random.uniform(0.0, 4.0)
+    return apply_jitter(tension_base, t), apply_jitter(combat_base, t)
 
-        self._validate_rows()
+def profile_middle(t):
+    tension_base = random.uniform(4.0, 6.0)
+    combat_base = random.uniform(4.0, 6.0)
+    return apply_jitter(tension_base, t), apply_jitter(combat_base, t)
 
-    def _validate_rows(self):
-        for row in self.rows:
-            source = row["source"]
-            if source not in self.source_roots:
-                raise KeyError(f"No root configured for source={source}")
+def profile_low_tension_no_combat(t):
+    tension_base = random.uniform(0.0, 4.0)
+    combat = torch.zeros_like(t)
+    return apply_jitter(tension_base, t), combat
 
-            filename = Path(row["path"]).name
-            tensor_path = self.source_roots[source] / filename
+def profile_high_tension_no_combat(t):
+    tension_base = random.uniform(6.0, 9.0)
+    combat = torch.zeros_like(t)
+    return apply_jitter(tension_base, t), combat
 
-            if not tensor_path.exists():
-                raise FileNotFoundError(tensor_path)
+def profile_no_tension_low_combat(t):
+    tension = torch.zeros_like(t)
+    combat_base = random.uniform(0.0, 4.0)
+    return tension, apply_jitter(combat_base, t)
 
-            declared_nc = int(row["num_codebooks"])
-            if declared_nc < NUM_CODEBOOKS_CODEC:
-                raise ValueError(
-                    f"{tensor_path}: expected at least {NUM_CODEBOOKS_CODEC} codebooks, "
-                    f"got {declared_nc}"
-                )
+def profile_no_tension_high_combat(t):
+    tension = torch.zeros_like(t)
+    combat_base = random.uniform(6.0, 9.0)
+    return tension, apply_jitter(combat_base, t)
 
-            if int(row["frame_rate"]) != FRAME_RATE:
-                raise ValueError(f"{tensor_path}: expected {FRAME_RATE} fps")
-            if float(row["bandwidth_kbps"]) != 24.0:
-                raise ValueError(f"{tensor_path}: expected 24 kbps")
-            if int(row["num_frames"]) < self.segment_frames:
-                raise ValueError(
-                    f"{tensor_path}: has only {row['num_frames']} frames, "
-                    f"but needs {self.segment_frames}"
-                )
-
-    def set_epoch(self, epoch):
-        self.epoch = epoch
-
-    def __len__(self):
-        return len(self.rows) * self.samples_per_track
-
-    def _path_for_row(self, row):
-        source = row["source"]
-        filename = Path(row["path"]).name
-        return self.source_roots[source] / filename
-
-    def _choose_start(self, row_index, crop_index, total_frames):
-        max_start = total_frames - self.segment_frames
-        if max_start <= 0:
-            return 0
-
-        if self.fixed_start:
-            generator = random.Random(
-                self.seed + 99_999_937 + row_index * 10_000 + crop_index
-            )
-        else:
-            generator = random.Random(
-                self.seed + self.epoch * 1_000_000 + row_index * 10_000 + crop_index
-            )
-
-        return generator.randint(0, max_start)
-
-    def __getitem__(self, index):
-        row_index = index // self.samples_per_track
-        crop_index = index % self.samples_per_track
-
-        row = self.rows[row_index]
-        tensor_path = self._path_for_row(row)
-
-        data = torch.load(tensor_path, map_location="cpu")
-
-        tokens_full = data["tokens"].long()  # [32, T]
-        tension = data["tension"].float()
-        combat_score = data["combat_score"].float()
-
-        if tokens_full.ndim != 2:
-            raise ValueError(f"{tensor_path}: tokens must be [n_q, T]")
-
-        total_frames = tokens_full.shape[-1]
-
-        if total_frames != len(tension):
-            raise ValueError(f"{tensor_path}: tokens/tension mismatch")
-        if total_frames != len(combat_score):
-            raise ValueError(f"{tensor_path}: tokens/combat mismatch")
-
-        tokens_model = tokens_full[:NUM_CODEBOOKS_MODEL]
-        tokens_codec = tokens_full  # [32, T]
-
-        start = self._choose_start(row_index, crop_index, total_frames)
-        end = start + self.segment_frames
-
-        return {
-            "tokens_model": tokens_model[:, start:end],   # [8, 750]
-            "tokens_codec": tokens_codec[:, start:end],  # [32, 750]
-            "tension": tension[start:end],
-            "combat_score": combat_score[start:end],
-            "source": row["source"],
-            "track_id": row["track_id"],
-            "path": row["path"],
-            "start_frame": start,
-            "crop_index": crop_index,
-        }
+CONDITION_PROFILES = {
+    "low": profile_low,
+    "high": profile_high,
+    "ramp": profile_ramp,
+    "lowT_highC": profile_lowT_highC,
+    "highT_lowC": profile_highT_lowC,
+    "middle" : profile_middle,
+    "lowT_noC": profile_low_tension_no_combat,
+    "highT_noC": profile_high_tension_no_combat,
+    "noT_lowC": profile_no_tension_low_combat,
+    "noT_highC": profile_no_tension_high_combat,
+}
 
 
-class CodebookSerializer:
-    def __init__(self, numcodebooks=8, codebooksize=1024, padtokenid=1024):
-        self.numcodebooks = numcodebooks
-        self.codebooksize = codebooksize
-        self.padtokenid = padtokenid
-
-    def delay(self, codes):
-        b, q, t = codes.shape
-        if (codes < 0).any() or (codes >= self.codebooksize).any():
-            raise ValueError("Invalid source EnCodec IDs")
-        out = torch.full(
-            (b, q, t + q - 1), self.padtokenid,
-            dtype=codes.dtype, device=codes.device
-        )
-        for codebook in range(q):
-            out[:, codebook, codebook:codebook + t] = codes[:, codebook]
-        return out
-
-    def undelay(self, delayed):
-        b, q, delayed_t = delayed.shape
-        t = delayed_t - q + 1
-        if t <= 0:
-            raise ValueError("Delayed sequence too short")
-        out = torch.empty((b, q, t), dtype=delayed.dtype, device=delayed.device)
-        for codebook in range(q):
-            out[:, codebook] = delayed[:, codebook, codebook:codebook + t]
-        if (out < 0).any() or (out >= self.codebooksize).any():
-            raise ValueError("Undelayed codes contain PAD/invalid IDs")
-        return out
-
-
-def delay_conditions(tension, combat, num_codebooks=8):
-    b, t = tension.shape
-    dt = t + num_codebooks - 1
-    tension_d = torch.zeros((b, num_codebooks, dt), dtype=tension.dtype)
-    combat_d = torch.zeros((b, num_codebooks, dt), dtype=combat.dtype)
-    valid = torch.zeros((b, num_codebooks, dt), dtype=torch.bool)
-    for q in range(num_codebooks):
-        tension_d[:, q, q:q+t] = tension
-        combat_d[:, q, q:q+t] = combat
-        valid[:, q, q:q+t] = True
-    return tension_d, combat_d, valid
-
-
-def prepare_batch(batch, serializer):
-    tokens = batch["tokens"].long()
-    tension = batch["tension"].float()
-    combat = batch["combat_score"].float()
-    delayed = serializer.delay(tokens)
-    td, cd, valid = delay_conditions(tension, combat, serializer.numcodebooks)
-    return {
-        "inputcodes": delayed[:, :, :-1],
-        "targetcodes": delayed[:, :, 1:],
-        "inputtension": td[:, 0, :-1],
-        "inputcombat": cd[:, 0, :-1],
-        "targettension": td[:, :, 1:],
-        "targetcombat": cd[:, :, 1:],
-        "targetmask": valid[:, :, 1:],
-    }
-
-
+# ── Model definition (same as training, renamed layers) ──
 class ConditionMLP(nn.Module):
     def __init__(self, inputdim, hiddendim, outputdim):
         super().__init__()
@@ -263,7 +140,6 @@ class ConditionMLP(nn.Module):
         )
     def forward(self, tension, combat):
         return self.network(torch.stack([tension, combat], dim=-1))
-
 
 class FrameCodebookEmbedding(nn.Module):
     def __init__(self, embeddingdim, numcodebooks, codebooksize, padtokenid):
@@ -276,7 +152,6 @@ class FrameCodebookEmbedding(nn.Module):
     def forward(self, codes):
         values = [emb(codes[:, q]) for q, emb in enumerate(self.embeddings)]
         return torch.stack(values, dim=2).sum(dim=2) / math.sqrt(self.numcodebooks)
-
 
 class SecundaTransformer(nn.Module):
     def __init__(self, embeddingdim, numlayers, numheads, feedforwarddim,
@@ -316,74 +191,11 @@ class SecundaTransformer(nn.Module):
             outputs.append(self.outputheads[codebook](hidden * (1 + gamma) + beta))
         return torch.stack(outputs, dim=1)
 
-
-def decode_codes_32cb(codes_32, path):
-    if codes_32.ndim == 3:
-        if codes_32.shape[0] != 1:
-            raise ValueError(f"Expected [1, 32, T], got {tuple(codes_32.shape)}")
-        codes_32 = codes_32[0]
-
-    if codes_32.ndim != 2:
-        raise ValueError(f"Expected [32, T], got {tuple(codes_32.shape)}")
-    if codes_32.shape[0] != NUM_CODEBOOKS_CODEC:
-        raise ValueError(f"Expected {NUM_CODEBOOKS_CODEC} codebooks, got {codes_32.shape[0]}")
-    if int(codes_32.min()) < 0 or int(codes_32.max()) >= CODEBOOK_SIZE:
-        raise ValueError(f"EnCodec IDs must be in [0, {CODEBOOK_SIZE - 1}]")
-
-    codes_32 = codes_32.long().to(device)  # [32, T]
-    codes_32 = codes_32.unsqueeze(0)       # [1, 32, T]
-
-    with torch.inference_mode():
-        decoded = codec.decode([(codes_32, None)])
-
-    audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
-    peak = float(np.max(np.abs(audio)))
-    if peak > 0:
-        audio = audio / peak * 0.98
-
-    wav_write(path, SAMPLE_RATE, audio)
-    return audio
-
-def decode_codes_8cb(codes_8, path):
-    """
-    codes_8: [1, 8, T] integer EnCodec IDs (0..1023).
-    Decodes using only 8 codebooks (lower bitrate, less detail).
-    """
-    if codes_8.ndim == 3:
-        if codes_8.shape[0] != 1:
-            raise ValueError(f"Expected [1, 8, T], got {tuple(codes_8.shape)}")
-        codes_8 = codes_8[0]
-
-    if codes_8.ndim != 2:
-        raise ValueError(f"Expected [8, T], got {tuple(codes_8.shape)}")
-    if codes_8.shape[0] != NUM_CODEBOOKS_MODEL:
-        raise ValueError(f"Expected {NUM_CODEBOOKS_MODEL} codebooks, got {codes_8.shape[0]}")
-    if int(codes_8.min()) < 0 or int(codes_8.max()) >= CODEBOOK_SIZE:
-        raise ValueError(f"EnCodec IDs must be in [0, {CODEBOOK_SIZE - 1}]")
-
-    codes_8 = codes_8.long().to(device)  # [8, T]
-    codes_8 = codes_8.unsqueeze(0)       # [1, 8, T]
-
-    with torch.inference_mode():
-        decoded = codec.decode([(codes_8, None)])
-
-    audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
-    peak = float(np.max(np.abs(audio)))
-    if peak > 0:
-        audio = audio / peak * 0.98
-
-    wav_write(path, SAMPLE_RATE, audio)
-    return audio
-
-
-# ---------------------------
-# Load checkpoint
-# ---------------------------
+# ── Load checkpoint ──
 checkpoint = torch.load(CHECKPOINT_PATH, map_location="cpu")
 cfg = checkpoint.get("config", {})
 print("Checkpoint epoch:", checkpoint.get("epoch"))
 print("Best validation loss:", checkpoint.get("best_val_loss"))
-print("Checkpoint config:", cfg)
 
 required = {
     "num_codebooks": 8,
@@ -427,100 +239,149 @@ model.load_state_dict(renamed_state, strict=True)
 model.eval()
 print("Loaded parameters:", f"{sum(p.numel() for p in model.parameters()):,}")
 
-# ---------------------------
-# Dataset & sampling
-# ---------------------------
-dataset = SecundaAudioDataset(
-    MANIFEST_PATH,
-    {"slakh": SLAKH_ROOT},
-    split="val",
-    stage="pretrain",
-    segment_seconds=10.0,
-    frame_rate=75,
-    fixed_start=True,
-    seed=SEED,
-    samples_per_track=1,
-)
-
-random.seed(SEED)
-sample_indices = random.sample(range(len(dataset)), k=min(NUM_TEST_TRACKS, len(dataset)))
-
-serializer = CodebookSerializer(numcodebooks=NUM_CODEBOOKS_MODEL)
-
-# ---------------------------
-# Codec
-# ---------------------------
+# ── Codec ──
 codec = EncodecModel.encodec_model_24khz().to(device)
-codec.set_target_bandwidth(24.0)
+# Setting bandwidth to 6.0 forces Encodec to expect exactly 8 codebooks,
+# allowing pure from-scratch decoding without the 32cb residual trick.
+codec.set_target_bandwidth(6.0) 
 codec.eval()
 
-# ---------------------------
-# Inference loop (3 versioni: GT 32cb, GT 8cb-only, Predicted)
-# ---------------------------
-from IPython.display import Audio, display
+# ── Helper: delay pattern (same as training) ──
+def delay_codes(codes):
+    B, Q, T = codes.shape
+    out = torch.full(
+        (B, Q, T + Q - 1), PAD_TOKEN_ID,
+        dtype=codes.dtype, device=codes.device
+    )
+    for q in range(Q):
+        out[:, q, q:q+T] = codes[:, q, :]
+    return out
 
-for rank, sample_index in enumerate(sample_indices, start=1):
-    item = dataset[sample_index]
+# ── Empty variables for pure from-scratch generation ──
+PROMPT_FRAMES = 225 
+prompt_tokens_8cb = torch.empty((NUM_CODEBOOKS_MODEL, 0), dtype=torch.long)
+prompt_tension    = torch.empty((0,), dtype=torch.float32)
+prompt_combat     = torch.empty((0,), dtype=torch.float32)
 
-    batch = {
-        "tokens": item["tokens_model"].unsqueeze(0),      # [1, 8, 750]
-        "tension": item["tension"].unsqueeze(0),
-        "combat_score": item["combat_score"].unsqueeze(0),
-    }
+# ── Autoregressive from-scratch generation ──
+def generate_from_scratch(
+    profile_name,
+    total_frames=SEGMENT_FRAMES,
+    prompt_frames=prompt_tokens_8cb,
+    prompt_tens=prompt_tension,
+    prompt_comb=prompt_combat,
+    temperature=1.0,
+    top_k=250,
+):
+    profile_fn = CONDITION_PROFILES[profile_name]
 
-    prepared = prepare_batch(batch, serializer)
-    prepared = {k: v.to(device) for k, v in prepared.items() if torch.is_tensor(v)}
+    t = torch.arange(total_frames + 1, device=device).float()
+    tension_full, combat_full = profile_fn(t) 
 
-    with torch.inference_mode():
-        logits = model(
-            prepared["inputcodes"],
-            prepared["inputtension"],
-            prepared["inputcombat"],
-            prepared["targettension"],
-            prepared["targetcombat"],
+    P = prompt_frames.shape[-1]
+    assert P <= total_frames
+
+    tokens_8cb = prompt_frames.clone().to(device)
+
+    for cur_len in range(P, total_frames):
+        L = cur_len
+        codes_sofar = tokens_8cb[:, :L].unsqueeze(0) 
+        delayed = delay_codes(codes_sofar)           
+        input_codes = delayed[:, :, :-1]             
+        S = input_codes.shape[-1]
+    
+        if S > total_frames:
+            input_codes = input_codes[:, :, :total_frames]
+            S = total_frames
+        
+        input_tension = tension_full[:S].unsqueeze(0)        
+        input_combat  = combat_full[:S].unsqueeze(0)         
+        
+        target_tension = (
+            tension_full[1:S+1]
+            .unsqueeze(0)            
+            .unsqueeze(1)            
+            .expand(-1, NUM_CODEBOOKS_MODEL, -1)  
+        )
+        target_combat = (
+            combat_full[1:S+1]
+            .unsqueeze(0)
+            .unsqueeze(1)
+            .expand(-1, NUM_CODEBOOKS_MODEL, -1)
+        )
+        
+        with torch.inference_mode():
+            logits = model(
+                input_codes,
+                input_tension,
+                input_combat,
+                target_tension,
+                target_combat,
+            ) 
+
+        next_logits = logits[:, :, -1, :].squeeze(0).clone() 
+
+        if temperature != 1.0:
+            next_logits = next_logits / temperature
+
+        # CRITICAL FIX: Forbid the generation of the PAD token before sampling
+        next_logits[:, PAD_TOKEN_ID] = float('-inf')
+
+        # Top-K filtering to eliminate garbage tokens while maintaining diversity
+        top_v, _ = torch.topk(next_logits, top_k, dim=-1)
+        min_top_v = top_v[:, -1].unsqueeze(-1)
+        
+        next_logits = torch.where(
+            next_logits < min_top_v, 
+            torch.full_like(next_logits, float('-inf')), 
+            next_logits
         )
 
-    predicted_delayed = logits.argmax(dim=-1)
+        probs = F.softmax(next_logits, dim=-1) 
 
-    known_final = prepared["targetcodes"][:, :, -1:].clone()
-    full_predicted_delayed = torch.cat([predicted_delayed, known_final], dim=-1)
-    predicted_8cb = serializer.undelay(full_predicted_delayed)  # [1, 8, 750]
+        # Sample stochastically
+        next_tokens = torch.multinomial(probs, 1).squeeze(-1) 
 
-    # 1) GT con tutti e 32 codebook
-    target_32cb = item["tokens_codec"].unsqueeze(0)  # [1, 32, 750]
+        tokens_8cb = torch.cat(
+            [tokens_8cb, next_tokens.unsqueeze(-1)], dim=-1
+        ) 
 
-    # 2) GT “troncato” a 8 codebook (per sentire il limite 8cb)
-    tokens_8cb_gt = item["tokens_codec"][:NUM_CODEBOOKS_MODEL].unsqueeze(0)  # [1, 8, 750]
+    return tokens_8cb
 
-    # 3) Predicted: 8cb modello + 24cb GT
-    pred_32cb = target_32cb.clone()
-    pred_32cb[:, :NUM_CODEBOOKS_MODEL, :] = predicted_8cb
 
-    # Paths
-    gt_32_path = f"/kaggle/working/slakh_gt_32cb_track{rank}.wav"
-    gt_8cb_path = f"/kaggle/working/slakh_gt_8cb_track{rank}.wav"
-    pred_path = f"/kaggle/working/slakh_predicted_track{rank}.wav"
+# ── Decode directly with exactly 8 codebooks ──
+def decode_8cb(tokens_8cb, path):
+    tokens_8cb = tokens_8cb.unsqueeze(0).to(device)
 
-    # Decode
-    gt_32_audio = decode_codes_32cb(target_32cb, gt_32_path)
-    gt_8cb_audio = decode_codes_8cb(tokens_8cb_gt, gt_8cb_path)
-    pred_audio = decode_codes_32cb(pred_32cb, pred_path)
+    with torch.inference_mode():
+        decoded = codec.decode([(tokens_8cb, None)])
 
-    print(
-        f"\nTrack {rank} | "
-        f"track_id={item['track_id']} | "
-        f"start_frame={item['start_frame']}"
+    audio = decoded[0].mean(dim=0).detach().cpu().numpy().astype(np.float32)
+    peak = float(np.max(np.abs(audio)))
+    if peak > 0:
+        audio = audio / peak * 0.98
+
+    wav_write(path, SAMPLE_RATE, audio)
+    return audio
+
+# ── Generate and save for each profile ──
+from IPython.display import Audio, display
+
+for profile_name in CONDITION_PROFILES.keys():
+    print(f"\nGenerating from scratch with profile: {profile_name}")
+
+    tokens_gen = generate_from_scratch(
+        profile_name,
+        total_frames=SEGMENT_FRAMES,
+        prompt_frames=prompt_tokens_8cb,
+        prompt_tens=prompt_tension,
+        prompt_comb=prompt_combat,
+        temperature=1.0,
+        top_k=50, # You can adjust this between 50 and 250 to test the variance
     )
-    print("Wrote WAV files:")
-    print("  GT 32cb:", gt_32_audio.shape, "->", gt_32_path)
-    print("  GT 8cb:", gt_8cb_audio.shape, "->", gt_8cb_path)
-    print("  Pred:", pred_audio.shape, "->", pred_path)
 
-    print("\nGround truth (32cb EnCodec):")
-    display(Audio(gt_32_path))
+    out_path = f"/kaggle/working/gen_scratch_{profile_name}.wav"
+    audio = decode_8cb(tokens_gen, out_path)
 
-    print("\nGround truth (8cb-only, limite 8 codebook):")
-    display(Audio(gt_8cb_path))
-
-    print("\nPredicted (8cb model + 32cb EnCodec, first 8cb replaced):")
-    display(Audio(pred_path))
+    print(f"Saved: {out_path}, audio shape: {audio.shape}")
+    display(Audio(out_path))

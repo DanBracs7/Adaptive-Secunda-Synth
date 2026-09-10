@@ -43,7 +43,7 @@ PREVIOUS_MANIFEST_PATH = (
 SPLIT_SEED = 42
 
 # Only sources that need a random train/val split.
-# Slakh's held-out "test" folder is assigned split="test" directly,
+
 # bypassing this dict entirely.
 VALIDATION_RATIOS = {
     "slakh": 0.12,

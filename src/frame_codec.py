@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-NUM_CODEBOOKS = 32
+NUM_CODEBOOKS = 8
 CODEBOOK_SIZE = 1024
 PAD_TOKEN_ID = CODEBOOK_SIZE
 MODEL_VOCAB_SIZE = CODEBOOK_SIZE + 1
+
 
 
 def validate_code_tensor(
@@ -325,79 +326,59 @@ class FrameCodebookEmbedding(nn.Module):
         return frame_embeddings
 
 
-def multi_codebook_cross_entropy(
-    logits,
-    target_codes,
-    pad_token_id=PAD_TOKEN_ID,
-):
+def multicodebook_cross_entropy_weighted(
+    logits: torch.Tensor,
+    target_codes: torch.Tensor,
+    pad_token_id: int,
+    loss_weights: torch.Tensor,
+) -> torch.Tensor:
     """
-    logits:
-        [B, Q, S, V], where V = CODEBOOK_SIZE + 1.
+    Weighted multi-codebook cross-entropy.
 
-    target_codes:
-        [B, Q, S], containing valid EnCodec IDs 0..1023 or PAD=1024.
-
-    PAD target positions are ignored because they are structural positions
-    introduced by the delay pattern, not real audio codes.
+    logits: B, Q, S, V (V = CODEBOOK_SIZE+1)
+    target_codes: B, Q, S, with EnCodec IDs [0..CODEBOOK_SIZE-1] or PAD_TOKEN_ID.
+    pad_token_id: ID to ignore in loss.
+    loss_weights: Q, weights per codebook.
     """
     if logits.ndim != 4:
-        raise ValueError(
-            "Expected logits shaped [B, Q, S, V], "
-            f"got {tuple(logits.shape)}"
-        )
-
+        raise ValueError(f"Expected logits shaped (B,Q,S,V), got {logits.shape}")
     if target_codes.ndim != 3:
-        raise ValueError(
-            "Expected target codes shaped [B, Q, S], "
-            f"got {tuple(target_codes.shape)}"
-        )
+        raise ValueError(f"Expected targets shaped (B,Q,S), got {target_codes.shape}")
+    if logits.shape[0] != target_codes.shape[0] or logits.shape[1] != target_codes.shape[1] or logits.shape[2] != target_codes.shape[2]:
+        raise ValueError(f"logits and targets must agree on B,Q,S: {logits.shape} vs {target_codes.shape}")
+    if logits.shape[1] != loss_weights.shape[0]:
+        raise ValueError(f"loss_weights must have length Q={logits.shape[1]}, got {loss_weights.shape[0]}")
 
-    batch_size, num_codebooks, time_steps, vocab_size = logits.shape
+    B, Q, S, V = logits.shape
 
-    if target_codes.shape != (
-        batch_size,
-        num_codebooks,
-        time_steps,
-    ):
-        raise ValueError(
-            "Logits and target code shapes are incompatible: "
-            f"logits={tuple(logits.shape)}, "
-            f"targets={tuple(target_codes.shape)}."
-        )
+    # Flatten over time per codebook: treat each (q, t) as a token position.
+    logits_flat = logits.reshape(B * Q * S, V)
+    targets_flat = target_codes.reshape(B * Q * S)
 
-    if vocab_size != pad_token_id + 1:
-        raise ValueError(
-            f"Expected vocabulary size {pad_token_id + 1}, "
-            f"got {vocab_size}."
-        )
+    # Mask out PAD positions
+    non_pad_mask = (targets_flat != pad_token_id)
+    if non_pad_mask.sum() == 0:
+        # No valid positions anywhere -> zero loss
+        return logits.new_zeros(())
 
-    minimum = int(target_codes.min())
-    maximum = int(target_codes.max())
+    logits_valid = logits_flat[non_pad_mask]
+    targets_valid = targets_flat[non_pad_mask]
 
-    if minimum < 0 or maximum > pad_token_id:
-        raise ValueError(
-            f"Target IDs must lie in [0, {pad_token_id}], "
-            f"but found min={minimum}, max={maximum}."
-        )
-
-    flattened_logits = logits.permute(
-        0,
-        2,
-        1,
-        3,
-    ).reshape(
-        -1,
-        vocab_size,
+    # Cross-entropy over valid positions
+    ce_per_pos = F.cross_entropy(
+        logits_valid,
+        targets_valid,
+        reduction="none",
     )
 
-    flattened_targets = target_codes.permute(
-        0,
-        2,
-        1,
-    ).reshape(-1)
+    # Map positions back to (q, t) to apply per-codebook weights
+    pos_idx = torch.nonzero(non_pad_mask, as_tuple=False).squeeze(1)
+    q_idx = (pos_idx // S) % Q  # since we flattened as B,Q,S
 
-    return F.cross_entropy(
-        flattened_logits,
-        flattened_targets,
-        ignore_index=pad_token_id,
-    )
+    # Apply weights: each position gets the weight of its codebook q
+    weights_per_pos = loss_weights[q_idx]
+
+    weighted_ce = ce_per_pos * weights_per_pos
+    # Normalize by sum of weights to keep the scale reasonable
+    loss = weighted_ce.sum() / weights_per_pos.sum()
+    return loss

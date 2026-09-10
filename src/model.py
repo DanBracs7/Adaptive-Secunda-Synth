@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 
@@ -44,12 +42,12 @@ class ConditionMLP(nn.Module):
 class SecundaTransformer(nn.Module):
     def __init__(
         self,
-        embedding_dim=128,
-        num_layers=2,
-        num_heads=4,
-        feedforward_dim=512,
+        embedding_dim=448,
+        num_layers=14,
+        num_heads=8,
+        feedforward_dim=2304,
         dropout=0.10,
-        max_sequence_length=800,
+        max_sequence_length=757,
         num_codebooks=NUM_CODEBOOKS,
         codebook_size=CODEBOOK_SIZE,
         pad_token_id=PAD_TOKEN_ID,
@@ -61,11 +59,21 @@ class SecundaTransformer(nn.Module):
                 "embedding_dim must be divisible by num_heads."
             )
 
+        if pad_token_id != codebook_size:
+            raise ValueError(
+                "PAD token must equal CODEBOOK_SIZE."
+            )
+
+        if MODEL_VOCAB_SIZE != pad_token_id + 1:
+            raise ValueError(
+                "MODEL_VOCAB_SIZE must equal PAD_TOKEN_ID + 1."
+            )
+
         self.embedding_dim = embedding_dim
         self.num_codebooks = num_codebooks
         self.codebook_size = codebook_size
         self.pad_token_id = pad_token_id
-        self.model_vocab_size = MODEL_VOCAB_SIZE
+        self.model_vocab_size = pad_token_id + 1
         self.max_sequence_length = max_sequence_length
 
         self.codebook_embedding = FrameCodebookEmbedding(
@@ -103,7 +111,6 @@ class SecundaTransformer(nn.Module):
 
         self.final_norm = nn.LayerNorm(embedding_dim)
 
-        # Produces gamma and beta for each codebook-specific target condition.
         self.output_condition_mlp = ConditionMLP(
             input_dim=2,
             hidden_dim=embedding_dim,
@@ -122,7 +129,10 @@ class SecundaTransformer(nn.Module):
 
     def _causal_mask(self, sequence_length, device):
         mask = torch.full(
-            (sequence_length, sequence_length),
+            (
+                sequence_length,
+                sequence_length,
+            ),
             float("-inf"),
             device=device,
         )
@@ -151,14 +161,16 @@ class SecundaTransformer(nn.Module):
             [B, Q, S]
 
         returns logits:
-            [B, Q, S, 1025]
+            [B, Q, S, V]
         """
         if input_codes.ndim != 3:
             raise ValueError(
                 "input_codes must have shape [B, Q, S]."
             )
 
-        batch_size, found_codebooks, sequence_length = input_codes.shape
+        batch_size, found_codebooks, sequence_length = (
+            input_codes.shape
+        )
 
         if found_codebooks != self.num_codebooks:
             raise ValueError(
@@ -235,14 +247,12 @@ class SecundaTransformer(nn.Module):
             + input_condition_embeddings
         )
 
-        causal_mask = self._causal_mask(
-            sequence_length,
-            input_codes.device,
-        )
-
         hidden = self.transformer(
             hidden,
-            mask=causal_mask,
+            mask=self._causal_mask(
+                sequence_length,
+                input_codes.device,
+            ),
         )
 
         hidden = self.final_norm(hidden)
