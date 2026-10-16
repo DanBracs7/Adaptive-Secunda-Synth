@@ -1,3 +1,11 @@
+# ARCHIVED: first-submission generation script, kept unchanged for the record.
+# Known issues found in review (fixed in src/generation.py):
+#   1. the delay pattern is not undone during sampling;
+#   2. control profiles use a 0-9 scale instead of the [0, 1] training scale;
+#   3. conditions are shifted by one frame and not delayed per codebook;
+#   4. generation starts from an empty prompt (all-PAD context).
+# Do not use it to produce results.
+
 #!pip install -q encodec
 #NOTE this script is designed to run in a Kaggle notebook environment. It generates audio from scratch using a fine-tuned Secunda model on the Slakh dataset, with various conditioning profiles for tension and combat. The generated audio is saved as WAV files and displayed for playback.
 #It is not ready to run in a local environment without modifications, as it relies on specific paths and dependencies available in the Kaggle environment.
