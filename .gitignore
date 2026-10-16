@@ -30,3 +30,8 @@ checkpoints/
 outputs/
 *.flac
 *.wav
+
+# Model checkpoints, tensors and raw audio (published separately)
+*.pt
+*.pth
+*.mp3

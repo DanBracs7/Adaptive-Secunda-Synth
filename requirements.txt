@@ -6,3 +6,10 @@ torchcodec
 soundfile
 scipy
 encodec
+
+# Imported by src/ and the notebooks. Pin them to the Kaggle versions
+# printed by notebooks/00_checkpoint_provenance.ipynb: the combat-score
+# features (HPSS, onsets, chroma CQT) depend on the librosa version.
+librosa
+pandas
+matplotlib

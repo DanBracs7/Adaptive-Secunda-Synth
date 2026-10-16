@@ -1,4 +1,5 @@
 import csv
+import sys
 from pathlib import Path
 
 import torch
@@ -6,31 +7,49 @@ import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-MANIFEST_PATH = PROJECT_ROOT / "manifests" / "all_tracks.csv"
+# Tensor folders come from src/paths.py, the same configuration used by
+# the notebooks (local defaults: datasets/slakh_final_1395_tensors/...).
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-SOURCE_ROOTS = {
-    "slakh": (
-        PROJECT_ROOT
-        / "datasets"
-        / "slakh_final_388tensors"
-        / "tensors_final"
-        / "train"
-    ),
-    "skyrim": PROJECT_ROOT / "datasets" / "skyrim",
-    "witcher3": PROJECT_ROOT / "datasets" / "witcher3",
-}
+from paths import get_path, source_roots_for_split  # noqa: E402
 
 
-def resolve_tensor_path(relative_path, source):
+MANIFEST_PATH = get_path("manifest")
+
+
+def resolve_tensor_path(relative_path, source, split):
+    # Slakh test tensors keep source="slakh" but live in their own folder,
+    # so the root depends on the split as well as on the source.
     filename = Path(relative_path).name
-    return SOURCE_ROOTS[source] / filename
+    return source_roots_for_split(split)[source] / filename
+
+
+def check_split_disjointness(usable_rows):
+    """Every track_id must belong to exactly one split."""
+    splits_per_track = {}
+
+    for row in usable_rows:
+        key = (row["source"], row["track_id"])
+        splits_per_track.setdefault(key, set()).add(row["split"])
+
+    shared = {
+        key: splits
+        for key, splits in splits_per_track.items()
+        if len(splits) > 1
+    }
+
+    if shared:
+        raise ValueError(
+            f"{len(shared)} track_ids appear in more than one split, "
+            f"e.g. {list(shared.items())[:5]}"
+        )
+
+    print("PASS: train/val/test are disjoint at track_id level.")
 
 
 def main():
     if not MANIFEST_PATH.exists():
         raise FileNotFoundError(MANIFEST_PATH)
-
-    rows = []
 
     with open(MANIFEST_PATH, newline="", encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
@@ -56,11 +75,23 @@ def main():
             f"reason={row['exclusion_reason']}"
         )
 
+    counts = {}
+    for row in usable_rows:
+        key = (row["source"], row["split"])
+        counts[key] = counts.get(key, 0) + 1
+
+    print("\nUsable rows per source and split:")
+    for (source, split), count in sorted(counts.items()):
+        print(f"  {source:<9} {split:<6}: {count}")
+
+    check_split_disjointness(usable_rows)
+
     for row in usable_rows:
         source = row["source"]
         tensor_path = resolve_tensor_path(
             row["path"],
             source,
+            row["split"],
         )
 
         if not tensor_path.exists():

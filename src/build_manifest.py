@@ -33,7 +33,7 @@ EXCLUSIONS_PATH = (
 
 OUTPUT_PATH = PROJECT_ROOT / "manifests" / "all_tracks.csv"
 
-# Previous manifest that already has the correct 1,035/35 Slakh split
+# Previous manifest with the frozen 704/96 Slakh train/val split (800 tracks)
 PREVIOUS_MANIFEST_PATH = (
     PROJECT_ROOT /
     "manifests" /
@@ -42,9 +42,10 @@ PREVIOUS_MANIFEST_PATH = (
 
 SPLIT_SEED = 42
 
-# Only sources that need a random train/val split.
-
-# bypassing this dict entirely.
+# Validation size per source. The OST sources use fixed counts. The Slakh
+# ratio is legacy: the original 800-track split (96/800 = 0.12) is frozen
+# in all_tracks_800.csv, and newer Slakh blocks use
+# SLAKH_NEW_VALIDATION_COUNT (see assign_splits).
 VALIDATION_RATIOS = {
     "slakh": 0.12,
 }
@@ -389,7 +390,7 @@ def validate_final_rows(rows):
                 f"got {observed_val}."
             )
 
-        # Slakh validation tracks consist of:
+    # Slakh validation tracks consist of:
     # - 96 frozen validation tracks from all_tracks_800.csv
     # - 35 new validation tracks from train_800.pt to train_1069.pt
     # - 35 new validation tracks from train_1070.pt to train_1394.pt
