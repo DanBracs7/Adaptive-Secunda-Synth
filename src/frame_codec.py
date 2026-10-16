@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 NUM_CODEBOOKS = 8
@@ -324,61 +323,3 @@ class FrameCodebookEmbedding(nn.Module):
         )
 
         return frame_embeddings
-
-
-def multicodebook_cross_entropy_weighted(
-    logits: torch.Tensor,
-    target_codes: torch.Tensor,
-    pad_token_id: int,
-    loss_weights: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Weighted multi-codebook cross-entropy.
-
-    logits: B, Q, S, V (V = CODEBOOK_SIZE+1)
-    target_codes: B, Q, S, with EnCodec IDs [0..CODEBOOK_SIZE-1] or PAD_TOKEN_ID.
-    pad_token_id: ID to ignore in loss.
-    loss_weights: Q, weights per codebook.
-    """
-    if logits.ndim != 4:
-        raise ValueError(f"Expected logits shaped (B,Q,S,V), got {logits.shape}")
-    if target_codes.ndim != 3:
-        raise ValueError(f"Expected targets shaped (B,Q,S), got {target_codes.shape}")
-    if logits.shape[0] != target_codes.shape[0] or logits.shape[1] != target_codes.shape[1] or logits.shape[2] != target_codes.shape[2]:
-        raise ValueError(f"logits and targets must agree on B,Q,S: {logits.shape} vs {target_codes.shape}")
-    if logits.shape[1] != loss_weights.shape[0]:
-        raise ValueError(f"loss_weights must have length Q={logits.shape[1]}, got {loss_weights.shape[0]}")
-
-    B, Q, S, V = logits.shape
-
-    # Flatten over time per codebook: treat each (q, t) as a token position.
-    logits_flat = logits.reshape(B * Q * S, V)
-    targets_flat = target_codes.reshape(B * Q * S)
-
-    # Mask out PAD positions
-    non_pad_mask = (targets_flat != pad_token_id)
-    if non_pad_mask.sum() == 0:
-        # No valid positions anywhere -> zero loss
-        return logits.new_zeros(())
-
-    logits_valid = logits_flat[non_pad_mask]
-    targets_valid = targets_flat[non_pad_mask]
-
-    # Cross-entropy over valid positions
-    ce_per_pos = F.cross_entropy(
-        logits_valid,
-        targets_valid,
-        reduction="none",
-    )
-
-    # Map positions back to (q, t) to apply per-codebook weights
-    pos_idx = torch.nonzero(non_pad_mask, as_tuple=False).squeeze(1)
-    q_idx = (pos_idx // S) % Q  # since we flattened as B,Q,S
-
-    # Apply weights: each position gets the weight of its codebook q
-    weights_per_pos = loss_weights[q_idx]
-
-    weighted_ce = ce_per_pos * weights_per_pos
-    # Normalize by sum of weights to keep the scale reasonable
-    loss = weighted_ce.sum() / weights_per_pos.sum()
-    return loss
