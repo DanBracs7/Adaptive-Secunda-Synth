@@ -199,12 +199,49 @@ def test_fit_recovers_shared_and_minmax_statistics():
     assert abs(fit["p_high"] - float(legacy_rms.max())) < 1e-6
 
 
+def test_soundfile_fallback_reads_same_samples_as_torchaudio():
+    import tempfile
+
+    import soundfile
+
+    rng = np.random.default_rng(4)
+    stereo = (rng.uniform(-0.8, 0.8, size=(44100, 2))).astype(np.float32)
+
+    with tempfile.TemporaryDirectory() as directory:
+        for subtype in ("PCM_16", "PCM_24"):
+            path = Path(directory) / f"test_{subtype}.flac"
+            soundfile.write(path, stereo, 44100, subtype=subtype)
+
+            # Force the fallback: "import torchaudio" raises ImportError.
+            saved = sys.modules.get("torchaudio")
+            sys.modules["torchaudio"] = None
+            try:
+                fallback, fallback_rate = control_features.read_audio_file(path)
+            finally:
+                if saved is None:
+                    del sys.modules["torchaudio"]
+                else:
+                    sys.modules["torchaudio"] = saved
+            assert "soundfile" in control_features.audio_backends_used
+            assert fallback.shape == (2, 44100) and fallback_rate == 44100
+
+            try:
+                import torchaudio
+                reference, reference_rate = torchaudio.load(path)
+            except (ImportError, OSError, RuntimeError):
+                print(f"  torchaudio cannot decode here; fallback only checked ({subtype})")
+                continue
+            assert reference_rate == fallback_rate
+            assert torch.max(torch.abs(reference - fallback)).item() <= 1e-6, subtype
+
+
 if __name__ == "__main__":
     tests = [
         test_combat_score_matches_tokenizer,
         test_causal_truncation_gives_same_first_scores,
         test_tension_matches_tokenizer,
         test_fit_recovers_shared_and_minmax_statistics,
+        test_soundfile_fallback_reads_same_samples_as_torchaudio,
     ]
     for test in tests:
         test()

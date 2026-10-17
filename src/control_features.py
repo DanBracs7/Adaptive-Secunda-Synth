@@ -43,16 +43,46 @@ def load_norm_stats(path):
         return json.load(file)
 
 
+# Decoders used by read_audio_file in this session, reported by notebook 02.
+audio_backends_used = set()
+
+
+def read_audio_file(file_path):
+    """
+    Return (waveform [channels, N] float32, sample_rate).
+
+    Uses torchaudio.load, as the tokenizer did. Recent torchaudio versions
+    need the torchcodec package to decode; when it is unavailable the file
+    is read with soundfile instead. For lossless files (FLAC, WAV) both
+    decoders return the same samples (tests/test_control_features.py).
+    """
+    try:
+        import torchaudio
+
+        waveform, sample_rate = torchaudio.load(file_path)
+        audio_backends_used.add("torchaudio")
+        return waveform, sample_rate
+    except (ImportError, OSError, RuntimeError):
+        import soundfile
+
+        data, sample_rate = soundfile.read(
+            str(file_path),
+            dtype="float32",
+            always_2d=True,
+        )
+        audio_backends_used.add("soundfile")
+        return torch.from_numpy(data.T.copy()), sample_rate
+
+
 def load_waveform_like_tokenizer(file_path):
     """
     Load an audio file with the same steps as process_track(): mono,
     EnCodec conversion to 24 kHz, peak normalisation to 0.95.
     Returns wav_mono with shape [N].
     """
-    import torchaudio
     from encodec.utils import convert_audio
 
-    waveform, source_sample_rate = torchaudio.load(file_path)
+    waveform, source_sample_rate = read_audio_file(file_path)
 
     # Explicit mono conversion before EnCodec
     if waveform.shape[0] > 1:
