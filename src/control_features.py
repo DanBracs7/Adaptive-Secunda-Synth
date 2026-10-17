@@ -4,8 +4,13 @@ notebooks/archive/new-slakh-token-normalized.ipynb (process_track), so that
 controls measured on generated audio use the same definition as the
 training conditions.
 
-This module currently contains the tension part. The combat-score
-functions are added in Phase 2.
+Tension: frame RMS normalised with norm_stats["tension_rms"].
+Combat score: weighted sum of five normalised features over a causal
+5-second window with a 1-second hop, held for 75 frames per hop.
+
+The functions keep the tokenizer code unchanged; the only difference is
+that norm_stats is passed as a parameter instead of read from a global.
+tests/test_control_features.py checks them against verbatim copies.
 """
 
 import json
@@ -162,3 +167,168 @@ def closest_known_tension_stats(fitted_stats):
             best_name, best_distance = name, distance
 
     return best_name, best_distance
+
+
+def frame_rms_legacy(wav_mono, num_frames):
+    """
+    Frame RMS of the early Colab tokenizer
+    (notebooks/archive/colab_ost_features_early_tokenizer.ipynb, cell 2):
+    floor frame size, padding to a multiple of it, unfold, then truncation
+    to the token length. Used only to recognise tensors produced by that
+    pipeline; the floor frame size is 319 instead of 320 samples for most
+    tracks, so these frames drift away from the codec frames.
+    """
+    num_samples = wav_mono.shape[-1]
+    frame_size = num_samples // num_frames if num_frames > 0 else 1
+
+    pad_len = (-num_samples) % frame_size
+    wav_padded = (
+        torch.nn.functional.pad(wav_mono, (0, pad_len))
+        if pad_len > 0 else wav_mono
+    )
+
+    rms_frames = torch.sqrt(
+        torch.mean(wav_padded.unfold(-1, frame_size, frame_size) ** 2, dim=-1)
+    )
+
+    return rms_frames[:num_frames]
+
+
+# ── Combat score (causal rolling window) ──
+
+COMBAT_FEATURES = (
+    "perc_ratio",
+    "percussive_loudness",
+    "note_shortness",
+    "dissonance",
+    "spectral_centroid_mean",
+)
+
+COMBAT_WEIGHTS = {
+    "perc_ratio": 0.30,
+    "percussive_loudness": 0.25,
+    "note_shortness": 0.10,
+    "dissonance": 0.15,
+    "spectral_centroid_mean": 0.20,
+}
+
+
+def normalize(value, feature_name, norm_stats):
+    stats = norm_stats[feature_name]
+    return float(np.clip(
+        (value - stats["p_low"]) /
+        (stats["p_high"] - stats["p_low"] + 1e-8),
+        0.0,
+        1.0,
+    ))
+
+
+def compute_combat_features_from_array(y, sr):
+    import librosa
+
+    y_harmonic, y_percussive = librosa.effects.hpss(y)
+
+    harmonic_energy = np.sum(y_harmonic ** 2)
+    percussive_energy = np.sum(y_percussive ** 2)
+    perc_ratio = percussive_energy / (
+        harmonic_energy + percussive_energy + 1e-8
+    )
+
+    perc_loudness = float(np.sqrt(np.mean(y_percussive ** 2)))
+
+    onsets = librosa.onset.onset_detect(y=y, sr=sr, units="time")
+    ioi = float(np.mean(np.diff(onsets))) if len(onsets) >= 2 else 1.5
+    note_shortness = float(np.clip(1.0 - ioi / 1.5, 0.0, 1.0))
+
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+    adjacent_energy = np.sum(chroma[:-1] * chroma[1:], axis=0)
+    dissonance = float(np.mean(
+        adjacent_energy / (np.sum(chroma, axis=0) + 1e-8)
+    ))
+
+    centroid = float(np.mean(
+        librosa.feature.spectral_centroid(y=y, sr=sr)
+    ))
+
+    return perc_ratio, perc_loudness, note_shortness, dissonance, centroid
+
+
+def compute_causal_combat_score_track(
+    y,
+    sr,
+    norm_stats,
+    window_sec=5.0,
+    hop_sec=1.0,
+    return_components=False,
+):
+    """
+    Each score at time t uses only audio in [t - 5 seconds, t].
+    No centered/future window leakage.
+
+    With return_components=True it also returns the raw (unnormalised)
+    features of every hop, shape [n_hops, 5] in COMBAT_FEATURES order;
+    hops that reuse the previous score (window shorter than 0.5 s) are NaN.
+    """
+    hop_len = int(hop_sec * sr)
+    window_len = int(window_sec * sr)
+    n_hops = max(1, int(np.ceil(len(y) / hop_len)))
+
+    scores = []
+    components = []
+
+    for i in range(n_hops):
+        end = min((i + 1) * hop_len, len(y))
+        start = max(0, end - window_len)
+        y_window = y[start:end]
+
+        if len(y_window) < int(0.5 * sr):
+            scores.append(scores[-1] if scores else 0.3)
+            components.append([np.nan] * len(COMBAT_FEATURES))
+            continue
+
+        perc_ratio, perc_loudness, note_shortness, dissonance, centroid = (
+            compute_combat_features_from_array(y_window, sr)
+        )
+
+        score = (
+            0.30 * normalize(perc_ratio, "perc_ratio", norm_stats) +
+            0.25 * normalize(perc_loudness, "percussive_loudness", norm_stats) +
+            0.10 * normalize(note_shortness, "note_shortness", norm_stats) +
+            0.15 * normalize(dissonance, "dissonance", norm_stats) +
+            0.20 * normalize(centroid, "spectral_centroid_mean", norm_stats)
+        )
+        scores.append(score)
+        components.append(
+            [perc_ratio, perc_loudness, note_shortness, dissonance, centroid]
+        )
+
+    scores = np.asarray(scores, dtype=np.float32)
+
+    if return_components:
+        return scores, hop_sec, np.asarray(components, dtype=np.float64)
+
+    return scores, hop_sec
+
+
+def align_causal_to_frames(window_scores, hop_sec, frame_rate, total_frames):
+    """
+    Causal sample-and-hold alignment:
+    one rolling score lasts until the next score becomes available.
+    """
+    hop_frames = max(1, round(hop_sec * frame_rate))
+    aligned = np.empty(total_frames, dtype=np.float32)
+
+    for i, score in enumerate(window_scores):
+        start = i * hop_frames
+        end = min(start + hop_frames, total_frames)
+
+        if start >= total_frames:
+            break
+
+        aligned[start:end] = score
+
+    filled_until = min(len(window_scores) * hop_frames, total_frames)
+    if filled_until < total_frames:
+        aligned[filled_until:] = window_scores[-1]
+
+    return aligned
