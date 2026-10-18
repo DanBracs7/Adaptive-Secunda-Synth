@@ -1,15 +1,28 @@
-numpy<2.0.0
-transformers>=4.38,<4.54
-torch
-torchaudio
+# Environment used to encode the tensors and train the three checkpoints
+# (Kaggle, Python 3.12.13; pip output in
+# notebooks/archive/new-slakh-token-normalized.ipynb):
+#   torch 2.10.0, torchaudio 2.10.0, numpy 2.0.2, encodec 0.1.1
+# The evaluation notebooks 00-02 ran with Python 3.13, torch 2.11.0 and
+# numpy 2.1.3 and reproduced Table 1 of the report exactly, so newer
+# versions are accepted below.
+torch>=2.10
+torchaudio>=2.10
+numpy
+encodec==0.1.1
+
+# Recent torchaudio versions decode audio through torchcodec.
+# src/control_features.py falls back to soundfile if it is missing.
 torchcodec
 soundfile
-scipy
-encodec
 
-# Imported by src/ and the notebooks. Pin them to the Kaggle versions
-# printed by notebooks/00_checkpoint_provenance.ipynb: the combat-score
-# features (HPSS, onsets, chroma CQT) depend on the librosa version.
-librosa
+# Combat-score features (HPSS, onsets, chroma CQT). librosa 0.11.0
+# reproduces the combat_score stored in the tensors (max |diff| <= 6e-8,
+# notebooks/02_control_statistics_audit.ipynb, Part C).
+librosa==0.11.0
+
+scipy
 pandas
 matplotlib
+
+# Only needed by src/archive/distortion_test.py:
+# transformers>=4.38,<4.54

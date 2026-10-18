@@ -23,7 +23,7 @@ SAMPLE_RATE = 24_000
 FRAME_RATE = 75
 PEAK_TARGET = 0.95
 
-# Values of norm_stats["tension_rms"] found in the project history. The
+# Values of norm_stats["tension_rms"] used to encode the tensors. The
 # tokenizer notebook re-estimates them in every run from randomly
 # subsampled RMS frames (unseeded torch.randperm in collect_rms_samples),
 # so each run produced slightly different values.
@@ -35,6 +35,14 @@ KNOWN_TENSION_RMS_STATS = {
     # printed by new-slakh-token-normalized.ipynb, run of 2026-09-05,
     # which encoded train_1070.pt to train_1394.pt
     "v3": {"p_low": 0.00793589388485998, "p_high": 0.21743767708539957},
+    # v4 and v5 were never saved to a file or printed. They were recovered
+    # by notebooks/02_control_statistics_audit.ipynb (Part B) by fitting the
+    # stored tension against the recomputed frame RMS, and are rounded to
+    # 6 decimals as printed there (the fit itself is accurate to ~1e-8).
+    # v4: Slakh train_400.pt to train_750.pt (every 25th tensor checked)
+    "v4": {"p_low": 0.009767, "p_high": 0.216359},
+    # v5: Slakh train_800.pt to train_1050.pt (every 25th tensor checked)
+    "v5": {"p_low": 0.007392, "p_high": 0.219332},
 }
 
 
