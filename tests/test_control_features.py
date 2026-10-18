@@ -8,7 +8,9 @@ identical results.
 
 Also checks the property used by notebooks/02_control_statistics_audit:
 because the combat window is causal, the scores of the first K hops
-computed on the first K seconds equal those computed on the full track.
+computed on the first K seconds equal those computed on the full track, and that
+combat_score_of_segment (used on generated clips) equals one causal
+window.
 
 Run from the repository root:
     python tests/test_control_features.py
@@ -199,6 +201,17 @@ def test_fit_recovers_shared_and_minmax_statistics():
     assert abs(fit["p_high"] - float(legacy_rms.max())) < 1e-6
 
 
+def test_segment_score_equals_one_causal_window():
+    # A 5-second segment: the last hop of the causal track uses exactly
+    # the whole segment as its window, so the two scores must be equal.
+    # The causal track stores its scores as float32, so the segment score
+    # (a Python float) is compared after the same conversion.
+    y = make_test_audio(seconds=5.0, seed=5)
+    scores, _ = control_features.compute_causal_combat_score_track(y, SAMPLE_RATE, NORM_STATS)
+    segment_score = control_features.combat_score_of_segment(y, SAMPLE_RATE, NORM_STATS)
+    assert np.float32(segment_score) == scores[-1], (segment_score, scores[-1])
+
+
 def test_soundfile_fallback_reads_same_samples_as_torchaudio():
     import tempfile
 
@@ -241,6 +254,7 @@ if __name__ == "__main__":
         test_causal_truncation_gives_same_first_scores,
         test_tension_matches_tokenizer,
         test_fit_recovers_shared_and_minmax_statistics,
+        test_segment_score_equals_one_causal_window,
         test_soundfile_fallback_reads_same_samples_as_torchaudio,
     ]
     for test in tests:

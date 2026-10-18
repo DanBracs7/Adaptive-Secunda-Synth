@@ -348,6 +348,37 @@ def compute_causal_combat_score_track(
     return scores, hop_sec
 
 
+def combat_score_of_segment(y, sr, norm_stats, return_components=False):
+    """
+    Combat score of one audio segment, computed exactly like one window of
+    compute_causal_combat_score_track (same features, normalisation and
+    weights), with the whole segment as the window.
+
+    Used on generated clips, where the windows of interest are chosen by
+    the experiment (e.g. before and after a requested change) instead of
+    the tokenizer's rolling 5-second window.
+    """
+    if len(y) < int(0.5 * sr):
+        raise ValueError("The segment must be at least 0.5 s long.")
+
+    perc_ratio, perc_loudness, note_shortness, dissonance, centroid = (
+        compute_combat_features_from_array(y, sr)
+    )
+
+    score = (
+        0.30 * normalize(perc_ratio, "perc_ratio", norm_stats) +
+        0.25 * normalize(perc_loudness, "percussive_loudness", norm_stats) +
+        0.10 * normalize(note_shortness, "note_shortness", norm_stats) +
+        0.15 * normalize(dissonance, "dissonance", norm_stats) +
+        0.20 * normalize(centroid, "spectral_centroid_mean", norm_stats)
+    )
+
+    if return_components:
+        return score, [perc_ratio, perc_loudness, note_shortness, dissonance, centroid]
+
+    return score
+
+
 def align_causal_to_frames(window_scores, hop_sec, frame_rate, total_frames):
     """
     Causal sample-and-hold alignment:
