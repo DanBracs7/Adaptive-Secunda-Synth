@@ -8,6 +8,8 @@ Tests for src/control_adherence.py.
    a tension gain of 0.5, no combat effect and no cross-talk.
 4. step_effects recovers a known step response.
 5. step_latency_seconds finds the delay of a delayed step.
+6. combat_effect_by_tension recovers a combat effect present only at
+   high tension.
 
 Run from the repository root:
     python tests/test_control_adherence.py
@@ -107,6 +109,20 @@ def test_step_latency():
     assert ca.step_latency_seconds(flat_with_noise) is None
 
 
+def test_combat_effect_by_tension():
+    rows = []
+    for unit in range(5):
+        for condition in ca.FACTORIAL_CONDITIONS:
+            high_tension, high_combat = condition[1] == "H", condition[4] == "H"
+            # Combat request raises the measured combat score by 0.2, only at high tension.
+            rows.append({"unit": unit, "condition": condition,
+                         "combat_full": 0.3 + 0.01 * unit + (0.2 if high_tension and high_combat else 0.0)})
+    effects = ca.combat_effect_by_tension(pd.DataFrame(rows)).set_index("comparison")
+    assert abs(effects.loc["combat effect at low tension", "effect"]) < 1e-9
+    assert abs(effects.loc["combat effect at high tension", "effect"] - 0.2) < 1e-9
+    assert abs(effects.loc["interaction (high - low tension)", "effect"] - 0.2) < 1e-9
+
+
 if __name__ == "__main__":
     tests = [
         test_requested_controls,
@@ -114,6 +130,7 @@ if __name__ == "__main__":
         test_factorial_effects_recover_known_effects,
         test_step_effects_recover_known_step,
         test_step_latency,
+        test_combat_effect_by_tension,
     ]
     for test in tests:
         test()

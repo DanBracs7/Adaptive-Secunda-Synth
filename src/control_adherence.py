@@ -218,3 +218,26 @@ def step_latency_seconds(curve, step_frame=STEP_FRAME, pre=SPANS["pre"], post=SP
     if len(after) == 0:
         return None
     return float(after[0] / FRAME_RATE)
+
+
+def combat_effect_by_tension(clips):
+    """
+    Effect of the combat-score request on the measured combat score at
+    each tension level, and their difference (interaction). A positive
+    interaction means the combat control acts more when tension is high.
+    clips: one row per clip with columns unit, condition, combat_full.
+    """
+    import pandas as pd
+
+    table = clips[clips["condition"].isin(FACTORIAL_CONDITIONS)].pivot(
+        index="unit", columns="condition", values="combat_full"
+    )
+    requested_difference = LEVELS["combat_score"]["high"] - LEVELS["combat_score"]["low"]
+    at_low_tension = table["tL_cH"] - table["tL_cL"]
+    at_high_tension = table["tH_cH"] - table["tH_cL"]
+
+    return pd.DataFrame([
+        {"comparison": "combat effect at low tension", **paired_effect(at_low_tension, requested_difference)},
+        {"comparison": "combat effect at high tension", **paired_effect(at_high_tension, requested_difference)},
+        {"comparison": "interaction (high - low tension)", **paired_effect(at_high_tension - at_low_tension)},
+    ])
