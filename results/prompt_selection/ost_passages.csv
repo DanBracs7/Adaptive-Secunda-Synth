@@ -1,0 +1,37 @@
+label,source,tensor_file,title,start,end,note,start_frame,end_frame,tension_mean,combat_mean,wav
+chill,skyrim,skyrim_006.pt,From Past to Present,0:29,0:55,,2175,4125,0.3519,0.1795,chill_skyrim_006_0m29.wav
+chill,skyrim,skyrim_006.pt,From Past to Present,3:30,3:59,,15750,17925,0.5301,0.211,chill_skyrim_006_3m30.wav
+chill,skyrim,skyrim_007.pt,Out of the Cold,0:00,0:10,,0,750,0.4878,0.2126,chill_skyrim_007_0m00.wav
+chill,skyrim,skyrim_008.pt,Around the Fire,0:00,0:10,,0,750,0.4161,0.3759,chill_skyrim_008_0m00.wav
+chill,skyrim,skyrim_019.pt,The Streets of Whiterun,0:00,1:20,,0,6000,0.427,0.1452,chill_skyrim_019_0m00.wav
+chill,skyrim,skyrim_019.pt,The Streets of Whiterun,3:08,3:22,,14100,15150,0.4593,0.18,chill_skyrim_019_3m08.wav
+chill,skyrim,skyrim_022.pt,Solitude,0:00,0:10,,0,750,0.3267,0.1593,chill_skyrim_022_0m00.wav
+chill,skyrim,skyrim_034.pt,Secunda,0:14,0:24,most representative part,1050,1800,0.4394,0.1718,chill_skyrim_034_0m14.wav
+chill,skyrim,skyrim_034.pt,Secunda,0:10,0:50,,750,3750,0.5425,0.2053,chill_skyrim_034_0m10.wav
+chill,skyrim,skyrim_034.pt,Secunda,0:46,1:10,second layer of the theme,3450,5250,0.6741,0.2642,chill_skyrim_034_0m46.wav
+fight,skyrim,skyrim_002.pt,Dragonborn,0:35,1:00,,2625,4500,0.3904,0.7576,fight_skyrim_002_0m35.wav
+fight,skyrim,skyrim_002.pt,Dragonborn,1:57,2:50,,8775,12750,0.5816,0.8749,fight_skyrim_002_1m57.wav
+fight,skyrim,skyrim_020.pt,One They Fear,0:00,0:10,strongest opening,0,750,0.4833,0.7444,fight_skyrim_020_0m00.wav
+fight,skyrim,skyrim_020.pt,One They Fear,0:10,0:30,,750,2250,0.6777,0.8316,fight_skyrim_020_0m10.wav
+fight,skyrim,skyrim_020.pt,One They Fear,0:30,1:00,,2250,4500,0.7513,0.7061,fight_skyrim_020_0m30.wav
+fight,skyrim,skyrim_025.pt,Watch the Skies,0:00,0:20,,0,1500,0.5194,0.8383,fight_skyrim_025_0m00.wav
+fight,skyrim,skyrim_025.pt,Watch the Skies,1:42,1:52,,7650,8400,0.7564,0.8584,fight_skyrim_025_1m42.wav
+fight,skyrim,skyrim_027.pt,Standing Stones,0:00,0:20,high tension; the rest of the track is less combat-like,0,1500,0.3418,0.2049,fight_skyrim_027_0m00.wav
+chill,witcher3,witcher3_026.pt,After the Storm,0:04,0:23,,300,1725,0.6876,0.2837,chill_witcher3_026_0m04.wav
+chill,witcher3,witcher3_026.pt,After the Storm,0:28,0:38,,2100,2850,0.7342,0.2118,chill_witcher3_026_0m28.wav
+chill,witcher3,witcher3_015.pt,Kaer Morhen,0:00,0:10,,0,750,0.4266,0.2699,chill_witcher3_015_0m00.wav
+chill,witcher3,witcher3_015.pt,Kaer Morhen,0:14,0:24,most of the track works,1050,1800,0.7148,0.3115,chill_witcher3_015_0m14.wav
+chill,witcher3,witcher3_033.pt,Merchants of Novigrad,0:40,0:50,,3000,3750,0.8471,0.7452,chill_witcher3_033_0m40.wav
+chill,witcher3,witcher3_031.pt,The Fields of Ard Skellig,0:50,1:30,,3750,6750,0.6374,0.1842,chill_witcher3_031_0m50.wav
+fight,witcher3,witcher3_018.pt,...Steel for Humans,0:24,0:34,the whole track is combat-like,1800,2550,0.9129,0.906,fight_witcher3_018_0m24.wav
+fight,witcher3,witcher3_018.pt,...Steel for Humans,1:05,1:15,,4875,5625,0.9286,0.9424,fight_witcher3_018_1m05.wav
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,0:00,0:10,strongest instrumental opening,0,750,0.6925,0.746,fight_witcher3_034_0m00.wav
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,0:12,0:22,,900,1650,0.8113,0.7411,fight_witcher3_034_0m12.wav
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,1:07,1:18,,5025,5850,0.8056,0.7884,fight_witcher3_034_1m07.wav
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,2:00,2:15,,9000,10125,0.906,0.7096,fight_witcher3_034_2m00.wav
+fight,witcher3,witcher3_027.pt,Blood on the Cobblestones,0:00,0:10,,0,750,0.8477,0.7761,fight_witcher3_027_0m00.wav
+fight,witcher3,witcher3_021.pt,Cloak and Dagger,0:55,1:15,,4125,5625,0.6414,0.5975,fight_witcher3_021_0m55.wav
+fight,witcher3,witcher3_009.pt,Silver for Monsters...,0:00,0:10,intro,0,750,0.358,0.38,fight_witcher3_009_0m00.wav
+fight,witcher3,witcher3_009.pt,Silver for Monsters...,1:30,1:55,most combat-like part,6750,8625,0.9714,0.8707,fight_witcher3_009_1m30.wav
+fight,witcher3,witcher3_029.pt,The Song of the Sword Dancer,0:00,0:10,,0,750,0.8467,0.7314,fight_witcher3_029_0m00.wav
+fight,witcher3,witcher3_029.pt,The Song of the Sword Dancer,0:19,0:29,,1425,2175,0.9347,0.8353,fight_witcher3_029_0m19.wav

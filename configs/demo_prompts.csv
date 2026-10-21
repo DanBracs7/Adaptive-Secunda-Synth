@@ -1,0 +1,37 @@
+label,source,tensor_file,title,start,end,note
+chill,skyrim,skyrim_006.pt,From Past to Present,0:29,0:55,
+chill,skyrim,skyrim_006.pt,From Past to Present,3:30,3:59,
+chill,skyrim,skyrim_007.pt,Out of the Cold,0:00,0:10,
+chill,skyrim,skyrim_008.pt,Around the Fire,0:00,0:10,
+chill,skyrim,skyrim_019.pt,The Streets of Whiterun,0:00,1:20,
+chill,skyrim,skyrim_019.pt,The Streets of Whiterun,3:08,3:22,
+chill,skyrim,skyrim_022.pt,Solitude,0:00,0:10,
+chill,skyrim,skyrim_034.pt,Secunda,0:14,0:24,most representative part
+chill,skyrim,skyrim_034.pt,Secunda,0:10,0:50,
+chill,skyrim,skyrim_034.pt,Secunda,0:46,1:10,second layer of the theme
+fight,skyrim,skyrim_002.pt,Dragonborn,0:35,1:00,
+fight,skyrim,skyrim_002.pt,Dragonborn,1:57,2:50,
+fight,skyrim,skyrim_020.pt,One They Fear,0:00,0:10,strongest opening
+fight,skyrim,skyrim_020.pt,One They Fear,0:10,0:30,
+fight,skyrim,skyrim_020.pt,One They Fear,0:30,1:00,
+fight,skyrim,skyrim_025.pt,Watch the Skies,0:00,0:20,
+fight,skyrim,skyrim_025.pt,Watch the Skies,1:42,1:52,
+fight,skyrim,skyrim_027.pt,Standing Stones,0:00,0:20,high tension; the rest of the track is less combat-like
+chill,witcher3,witcher3_026.pt,After the Storm,0:04,0:23,
+chill,witcher3,witcher3_026.pt,After the Storm,0:28,0:38,
+chill,witcher3,witcher3_015.pt,Kaer Morhen,0:00,0:10,
+chill,witcher3,witcher3_015.pt,Kaer Morhen,0:14,0:24,most of the track works
+chill,witcher3,witcher3_033.pt,Merchants of Novigrad,0:40,0:50,
+chill,witcher3,witcher3_031.pt,The Fields of Ard Skellig,0:50,1:30,
+fight,witcher3,witcher3_018.pt,...Steel for Humans,0:24,0:34,the whole track is combat-like
+fight,witcher3,witcher3_018.pt,...Steel for Humans,1:05,1:15,
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,0:00,0:10,strongest instrumental opening
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,0:12,0:22,
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,1:07,1:18,
+fight,witcher3,witcher3_034.pt,Hunt or Be Hunted,2:00,2:15,
+fight,witcher3,witcher3_027.pt,Blood on the Cobblestones,0:00,0:10,
+fight,witcher3,witcher3_021.pt,Cloak and Dagger,0:55,1:15,
+fight,witcher3,witcher3_009.pt,Silver for Monsters...,0:00,0:10,intro
+fight,witcher3,witcher3_009.pt,Silver for Monsters...,1:30,1:55,most combat-like part
+fight,witcher3,witcher3_029.pt,The Song of the Sword Dancer,0:00,0:10,
+fight,witcher3,witcher3_029.pt,The Song of the Sword Dancer,0:19,0:29,
