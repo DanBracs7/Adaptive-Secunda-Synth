@@ -27,9 +27,13 @@ In training, delayed position 0 is never a target (inputs are D[:, :, :-1],
 targets D[:, :, 1:]), so the model cannot produce the first frame of
 codebook 0 from nothing: a prompt of at least one real frame is required.
 
+Each step reuses the keys and values of the previous positions
+(KeyValueCache), so only the newest position is processed; this gives the
+same logits as re-running the whole prefix and is several times faster.
+
 tests/test_generation.py checks the conditions against
-prepare_batch_for_model and the step-by-step logits against a single
-teacher-forced forward pass.
+prepare_batch_for_model and the step-by-step logits (with and without the
+cache) against a single teacher-forced forward pass.
 """
 
 import time
@@ -167,6 +171,98 @@ def sample_top_k(logits, temperature=DEFAULT_TEMPERATURE, top_k=DEFAULT_TOP_K, n
     return (logits + noise).argmax(dim=-1)
 
 
+# ── Key/value cache ──
+#
+# SecundaTransformer re-runs the whole prefix at every call. During
+# generation the prefix only grows by one position per step, and with a
+# causal mask the hidden states of the old positions never change, so the
+# keys and values of every layer can be stored and reused: each step then
+# processes a single new position. _forward_with_cache recomputes exactly
+# the operations of SecundaTransformer.forward (pre-norm encoder layers,
+# FiLM output heads) for the new positions only; tests/test_generation.py
+# checks that its logits equal those of the full forward pass.
+
+class KeyValueCache:
+    """Per-layer keys and values [B, heads, max_sequence_length, head_dim]."""
+
+    def __init__(self, model, batch_size, device, dtype=torch.float32):
+        first_attention = model.transformer.layers[0].self_attn
+        self.num_heads = first_attention.num_heads
+        self.head_dim = model.embedding_dim // self.num_heads
+        shape = (batch_size, self.num_heads, model.max_sequence_length, self.head_dim)
+        self.keys = [torch.zeros(shape, device=device, dtype=dtype) for _ in model.transformer.layers]
+        self.values = [torch.zeros(shape, device=device, dtype=dtype) for _ in model.transformer.layers]
+        self.length = 0
+
+
+def _forward_with_cache(model, cache, codes, input_tension, input_combat, target_tension, target_combat):
+    """
+    Logits [B, Q, n, V] for n new delayed positions (cache.length to
+    cache.length + n - 1), given their codes [B, Q, n] and conditions
+    (input_* [B, n], target_* [B, Q, n]). Appends their keys and values.
+    """
+    batch_size, num_codebooks, new_positions = codes.shape
+    start = cache.length
+    end = start + new_positions
+    if end > model.max_sequence_length:
+        raise ValueError(f"Position {end} exceeds max_sequence_length={model.max_sequence_length}.")
+
+    positions = torch.arange(start, end, device=codes.device)
+    hidden = (
+        model.codebook_embedding(codes)
+        + model.position_embedding(positions).unsqueeze(0)
+        + model.input_condition_mlp(input_tension, input_combat)
+    )
+
+    # Causal mask of the new positions over all cached positions.
+    if new_positions > 1:
+        query_positions = positions.unsqueeze(1)
+        key_positions = torch.arange(end, device=codes.device).unsqueeze(0)
+        attention_mask = key_positions <= query_positions          # [n, end], True = attend
+    else:
+        attention_mask = None
+
+    for index, layer in enumerate(model.transformer.layers):
+        attention = layer.self_attn
+
+        # Pre-norm self-attention block (norm_first=True).
+        normed = layer.norm1(hidden)
+        query, key, value = torch.nn.functional.linear(
+            normed, attention.in_proj_weight, attention.in_proj_bias
+        ).chunk(3, dim=-1)
+
+        def split_heads(tensor):
+            return tensor.view(batch_size, new_positions, cache.num_heads, cache.head_dim).transpose(1, 2)
+
+        cache.keys[index][:, :, start:end] = split_heads(key)
+        cache.values[index][:, :, start:end] = split_heads(value)
+
+        attended = torch.nn.functional.scaled_dot_product_attention(
+            split_heads(query),
+            cache.keys[index][:, :, :end],
+            cache.values[index][:, :, :end],
+            attn_mask=attention_mask,
+        )
+        attended = attended.transpose(1, 2).reshape(batch_size, new_positions, model.embedding_dim)
+        hidden = hidden + attention.out_proj(attended)
+
+        # Pre-norm feed-forward block.
+        hidden = hidden + layer.linear2(layer.activation(layer.linear1(layer.norm2(hidden))))
+
+    cache.length = end
+    hidden = model.final_norm(hidden)
+
+    # Output heads with per-codebook FiLM, as in SecundaTransformer.forward.
+    codebook_logits = []
+    for codebook_index in range(num_codebooks):
+        gamma, beta = model.output_condition_mlp(
+            target_tension[:, codebook_index, :], target_combat[:, codebook_index, :]
+        ).chunk(2, dim=-1)
+        codebook_logits.append(model.output_heads[codebook_index]((1.0 + gamma) * hidden + beta))
+
+    return torch.stack(codebook_logits, dim=1)
+
+
 # ── Generation loop ──
 
 def _check_inputs(model, prompt_codes, tension, combat_score):
@@ -217,7 +313,7 @@ def _check_inputs(model, prompt_codes, tension, combat_score):
     return batch_size, prompt_frames, total_frames
 
 
-def _run_delayed_loop(model, prompt_codes, tension, combat_score, choose_tokens):
+def _run_delayed_loop(model, prompt_codes, tension, combat_score, choose_tokens, use_cache=True):
     """
     Shared loop of generate_codes and of the tests.
 
@@ -226,6 +322,9 @@ def _run_delayed_loop(model, prompt_codes, tension, combat_score, choose_tokens)
         logits:      [B, Q, V] predicted for delayed position `step`
         frame_index: [Q] original frame of each codebook at that position
         to_sample:   [Q] bool, True where the cell must be generated
+    With use_cache=True each step processes only the newest position
+    (KeyValueCache); with use_cache=False the whole prefix is re-run, as
+    SecundaTransformer.forward does. Both give the same logits.
     Returns the filled delayed buffer [B, Q, T + Q - 1].
     """
     if model.training:
@@ -254,6 +353,7 @@ def _run_delayed_loop(model, prompt_codes, tension, combat_score, choose_tokens)
     )
 
     codebook_offsets = torch.arange(num_codebooks, device=device)
+    cache = KeyValueCache(model, batch_size, device) if use_cache else None
 
     # The first cell to generate is frame prompt_frames of codebook 0, at
     # delayed position prompt_frames; the last one is frame T - 1 of
@@ -262,13 +362,27 @@ def _run_delayed_loop(model, prompt_codes, tension, combat_score, choose_tokens)
         frame_index = step - codebook_offsets
         to_sample = (frame_index >= prompt_frames) & (frame_index < total_frames)
 
-        logits = model(
-            input_codes=delayed_codes[:, :, :step],
-            input_tension=conditions["input_tension"][:, :step],
-            input_combat=conditions["input_combat"][:, :step],
-            target_tension=conditions["target_tension"][:, :, :step],
-            target_combat=conditions["target_combat"][:, :, :step],
-        )[:, :, -1, :]
+        if cache is None:
+            logits = model(
+                input_codes=delayed_codes[:, :, :step],
+                input_tension=conditions["input_tension"][:, :step],
+                input_combat=conditions["input_combat"][:, :step],
+                target_tension=conditions["target_tension"][:, :, :step],
+                target_combat=conditions["target_combat"][:, :, :step],
+            )[:, :, -1, :]
+        else:
+            # First step: all prompt positions at once; then one new
+            # position (the column written at the previous step) per step.
+            new = slice(cache.length, step)
+            logits = _forward_with_cache(
+                model,
+                cache,
+                codes=delayed_codes[:, :, new],
+                input_tension=conditions["input_tension"][:, new],
+                input_combat=conditions["input_combat"][:, new],
+                target_tension=conditions["target_tension"][:, :, new],
+                target_combat=conditions["target_combat"][:, :, new],
+            )[:, :, -1, :]
 
         chosen = choose_tokens(step, logits, frame_index, to_sample)
         delayed_codes[:, to_sample, step] = chosen[:, to_sample]
@@ -286,6 +400,7 @@ def generate_codes(
     top_k=DEFAULT_TOP_K,
     seed=None,
     shared_noise=False,
+    use_cache=True,
 ):
     """
     Generate codes for a whole segment.
@@ -302,6 +417,9 @@ def generate_codes(
         generated alone or in a batch with the same seed. This is the
         paired design of the experiments. If False, the batch elements
         are independent samples.
+    use_cache: reuse the keys and values of past positions (KeyValueCache).
+        Same logits up to floating-point rounding, much faster. Notebooks
+        03 and 05 were run before the cache existed (use_cache=False).
 
     Returns codes [B, Q, T]; the first P frames equal the prompt.
     """
@@ -324,7 +442,7 @@ def generate_codes(
         )
 
     delayed_codes = _run_delayed_loop(
-        model, prompt_codes, tension, combat_score, choose_tokens
+        model, prompt_codes, tension, combat_score, choose_tokens, use_cache=use_cache
     )
 
     return CodebookSerializer().undelay(delayed_codes)

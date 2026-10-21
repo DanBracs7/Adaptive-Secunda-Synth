@@ -17,7 +17,9 @@ checkpoint or GPU needed).
 6. With shared_noise=True (paired design) identical controls give
    identical samples, and a sample does not depend on the other batch
    elements.
-7. Invalid inputs are refused (controls outside [0, 1], empty prompt,
+7. The key/value cache gives the same logits as re-running the whole
+   prefix (test 3 is run with and without the cache) and the same codes.
+8. Invalid inputs are refused (controls outside [0, 1], empty prompt,
    segment longer than the positional embedding).
 
 Run from the repository root:
@@ -88,7 +90,7 @@ def test_conditions_match_training():
         assert torch.equal(generation[key], training[key]), key
 
 
-def test_stepwise_logits_match_teacher_forcing():
+def test_stepwise_logits_match_teacher_forcing(use_cache=True):
     model = make_model()
     batch = make_batch(batch_size=1)
     serializer = CodebookSerializer()
@@ -120,7 +122,7 @@ def test_stepwise_logits_match_teacher_forcing():
     prompt = batch["tokens"][:, :, :PROMPT_FRAMES]
     with torch.no_grad():
         filled = _run_delayed_loop(
-            model, prompt, batch["tension"], batch["combat_score"], write_real_codes
+            model, prompt, batch["tension"], batch["combat_score"], write_real_codes, use_cache=use_cache
         )
 
     assert max_difference < 1e-4, max_difference
@@ -205,6 +207,19 @@ def test_shared_noise_gives_paired_samples():
     assert not torch.equal(independent[0], independent[1])
 
 
+def test_stepwise_logits_without_cache():
+    test_stepwise_logits_match_teacher_forcing(use_cache=False)
+
+
+def test_cache_gives_the_same_codes():
+    model = make_model()
+    batch = make_batch(batch_size=2)
+    prompt = batch["tokens"][:, :, :PROMPT_FRAMES]
+    cached = generate_codes(model, prompt, batch["tension"], batch["combat_score"], seed=5, use_cache=True)
+    recomputed = generate_codes(model, prompt, batch["tension"], batch["combat_score"], seed=5, use_cache=False)
+    assert torch.equal(cached, recomputed)
+
+
 def expect_value_error(function):
     try:
         function()
@@ -233,6 +248,8 @@ if __name__ == "__main__":
         test_delay_round_trip,
         test_conditions_match_training,
         test_stepwise_logits_match_teacher_forcing,
+        test_stepwise_logits_without_cache,
+        test_cache_gives_the_same_codes,
         test_generate_codes_keeps_prompt_and_is_reproducible,
         test_sampling_matches_top_k_distribution,
         test_shared_noise_gives_paired_samples,
