@@ -63,6 +63,13 @@ KAGGLE_PATHS = {
         / "secunda-finetuned-on-ost-v2" / "pytorch" / "default" / "1"
         / "secunda_slakh8cb_finetune_best_ost.pt"
     ),
+    # E4 control runs R1 and R2 (notebook 06): model-only copies of final.pt.
+    "ckpt_e4_r1": (
+        KAGGLE_DATASETS / "secunda-e4-control-runs" / "secunda_e4_R1_final_model.pt"
+    ),
+    "ckpt_e4_r2": (
+        KAGGLE_DATASETS / "secunda-e4-control-runs" / "secunda_e4_R2_final_model.pt"
+    ),
     "output_dir": Path("/kaggle/working"),
 }
 
@@ -84,6 +91,8 @@ LOCAL_PATHS = {
     "ckpt_ost_ft": (
         REPO_ROOT / "checkpoints" / "secunda_slakh8cb_finetune_best_ost.pt"
     ),
+    "ckpt_e4_r1": REPO_ROOT / "checkpoints" / "secunda_e4_R1_final_model.pt",
+    "ckpt_e4_r2": REPO_ROOT / "checkpoints" / "secunda_e4_R2_final_model.pt",
     "output_dir": REPO_ROOT / "outputs",
 }
 
