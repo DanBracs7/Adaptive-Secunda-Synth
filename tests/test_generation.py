@@ -13,13 +13,16 @@ checkpoint or GPU needed).
 4. generate_codes keeps the prompt, never outputs PAD, and is
    reproducible with a seed.
 5. Gumbel-max sampling follows the top-k softmax distribution and never
-   returns PAD or an ID outside the top k.
+   returns PAD or an ID outside the top k. A per-codebook temperature
+   scales each codebook separately.
 6. With shared_noise=True (paired design) identical controls give
    identical samples, and a sample does not depend on the other batch
    elements.
 7. The key/value cache gives the same logits as re-running the whole
    prefix (test 3 is run with and without the cache) and the same codes.
-8. Invalid inputs are refused (controls outside [0, 1], empty prompt,
+8. generate_long_codes equals generate_codes within one window and keeps
+   the prompt and the first window when it slides over several windows.
+9. Invalid inputs are refused (controls outside [0, 1], empty prompt,
    segment longer than the positional embedding).
 
 Run from the repository root:
@@ -39,6 +42,8 @@ from generation import (  # noqa: E402
     _run_delayed_loop,
     build_generation_conditions,
     generate_codes,
+    generate_long_codes,
+    gumbel_noise,
     sample_top_k,
     ramp_control,
     step_control,
@@ -175,6 +180,34 @@ def test_sampling_matches_top_k_distribution():
     assert torch.allclose(observed, expected, atol=0.005), (observed, expected)
 
 
+def test_per_codebook_temperature():
+    generator = torch.Generator().manual_seed(2)
+    logits = torch.randn(3, NUM_CODEBOOKS, PAD_TOKEN_ID + 1, generator=generator)
+    noise = gumbel_noise(logits.shape, logits.device, generator)
+
+    # The same value for every codebook is the same as a single number.
+    single = sample_top_k(logits, temperature=0.8, top_k=50, noise=noise)
+    assert torch.equal(sample_top_k(logits, temperature=[0.8] * NUM_CODEBOOKS, top_k=50, noise=noise), single)
+
+    # Q0 at 1.0 and Q1-Q7 near 0: Q0 is the usual sample, Q1-Q7 the argmax.
+    mixed = sample_top_k(logits, temperature=[1.0] + [1e-4] * (NUM_CODEBOOKS - 1), top_k=50, noise=noise)
+    masked = logits.clone()
+    masked[..., PAD_TOKEN_ID] = float("-inf")
+    assert torch.equal(mixed[:, 0], sample_top_k(logits, temperature=1.0, top_k=50, noise=noise)[:, 0])
+    assert torch.equal(mixed[:, 1:], masked.argmax(dim=-1)[:, 1:])
+
+    # Wrong length or a value <= 0 is refused.
+    expect_value_error(lambda: sample_top_k(logits, temperature=[1.0] * (NUM_CODEBOOKS - 1), noise=noise))
+    expect_value_error(lambda: sample_top_k(logits, temperature=[1.0] + [0.0] * (NUM_CODEBOOKS - 1), noise=noise))
+
+    # generate_codes accepts it.
+    model = make_model()
+    batch = make_batch(batch_size=1)
+    codes = generate_codes(model, batch["tokens"][:, :, :PROMPT_FRAMES], batch["tension"], batch["combat_score"],
+                           temperature=[1.0] + [0.7] * (NUM_CODEBOOKS - 1), seed=1)
+    assert codes.shape == (1, NUM_CODEBOOKS, TOTAL_FRAMES)
+
+
 def test_shared_noise_gives_paired_samples():
     model = make_model()
     batch = make_batch(batch_size=1)
@@ -220,6 +253,28 @@ def test_cache_gives_the_same_codes():
     assert torch.equal(cached, recomputed)
 
 
+def test_long_generation():
+    window = TOTAL_FRAMES   # the small model's window (max_sequence_length - Q + 2)
+    model = make_model()
+    batch = make_batch(batch_size=1)
+    prompt = batch["tokens"][:, :, :PROMPT_FRAMES]
+
+    # Within one window: identical to generate_codes.
+    short = generate_long_codes(model, prompt, batch["tension"], batch["combat_score"], context_frames=10, seed=4)
+    assert torch.equal(short, generate_codes(model, prompt, batch["tension"], batch["combat_score"], seed=4))
+
+    # Over several windows: right length, prompt kept, first window unchanged.
+    long_frames = 2 * window + 7
+    generator = torch.Generator().manual_seed(3)
+    tension, combat = torch.rand(1, long_frames, generator=generator), torch.rand(1, long_frames, generator=generator)
+    long = generate_long_codes(model, prompt, tension, combat, context_frames=10, seed=4)
+    assert long.shape == (1, NUM_CODEBOOKS, long_frames)
+    assert torch.equal(long[:, :, :PROMPT_FRAMES], prompt)
+    first_window = generate_codes(model, prompt, tension[:, :window], combat[:, :window], seed=4)
+    assert torch.equal(long[:, :, :window], first_window)
+    assert int(long.min()) >= 0 and int(long.max()) < CODEBOOK_SIZE
+
+
 def expect_value_error(function):
     try:
         function()
@@ -252,7 +307,9 @@ if __name__ == "__main__":
         test_cache_gives_the_same_codes,
         test_generate_codes_keeps_prompt_and_is_reproducible,
         test_sampling_matches_top_k_distribution,
+        test_per_codebook_temperature,
         test_shared_noise_gives_paired_samples,
+        test_long_generation,
         test_invalid_inputs_are_refused,
     ]
     for test in tests:

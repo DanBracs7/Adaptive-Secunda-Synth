@@ -152,14 +152,22 @@ def sample_top_k(logits, temperature=DEFAULT_TEMPERATURE, top_k=DEFAULT_TOP_K, n
     IDs. Its advantage over torch.multinomial is that the random numbers
     are explicit: `noise` can be shared by several batch elements (see
     generate_codes, shared_noise=True).
+
+    temperature: a number (0 = greedy), or one value > 0 per codebook for
+    logits [..., Q, V] (e.g. a lower temperature for Q1-Q7 than for Q0).
     """
     logits = logits.float().clone()
     logits[..., PAD_TOKEN_ID] = float("-inf")
 
-    if temperature <= 0:
-        return logits.argmax(dim=-1)
-
-    logits = logits / temperature
+    if isinstance(temperature, (int, float)):
+        if temperature <= 0:
+            return logits.argmax(dim=-1)
+        logits = logits / temperature
+    else:
+        temperature = torch.as_tensor(temperature, dtype=logits.dtype, device=logits.device)
+        if temperature.ndim != 1 or temperature.shape[0] != logits.shape[-2] or bool((temperature <= 0).any()):
+            raise ValueError("A per-codebook temperature needs one value > 0 per codebook.")
+        logits = logits / temperature[:, None]
 
     if top_k is not None and top_k < logits.shape[-1]:
         kth_value = torch.topk(logits, top_k, dim=-1).values[..., -1:]
@@ -409,6 +417,7 @@ def generate_codes(
     tension, combat_score: [B, T] control tracks in [0, 1] for all T frames
         (the first P values should be the prompt's own controls, see
         with_prompt_controls)
+    temperature: a number, or Q values (one per codebook, see sample_top_k).
     seed: makes sampling reproducible.
     shared_noise: if True, every batch element uses the same random
         numbers at every step ("common random numbers"). With the same
@@ -446,6 +455,58 @@ def generate_codes(
     )
 
     return CodebookSerializer().undelay(delayed_codes)
+
+
+@torch.inference_mode()
+def generate_long_codes(
+    model,
+    prompt_codes,
+    tension,
+    combat_score,
+    context_frames=375,
+    seed=None,
+    **sampling,
+):
+    """
+    Generate more frames than one window (750 frames = 10 s) by sliding.
+
+    The first window starts from the prompt; every following window starts
+    from the last `context_frames` frames already generated (5 s by
+    default) and adds window - context_frames new frames. Each window is
+    an ordinary generate_codes call, so the conditions are built exactly
+    as in training; window k uses seed + k.
+
+    tension, combat_score: [B, T] for the whole output (any T).
+    Returns codes [B, Q, T]; the first P frames equal the prompt. With
+    T <= 750 the result is the same as generate_codes.
+    """
+    window = model.max_sequence_length - NUM_CODEBOOKS + 2
+    total_frames = tension.shape[1]
+
+    if not 0 < context_frames < window:
+        raise ValueError(f"context_frames must lie in (0, {window}).")
+
+    codes = prompt_codes
+    window_index = 0
+
+    while codes.shape[-1] < total_frames:
+        available = codes.shape[-1]
+        context = available if window_index == 0 else min(context_frames, available)
+        start = available - context
+        end = min(start + window, total_frames)
+
+        window_codes = generate_codes(
+            model,
+            codes[:, :, start:],
+            tension[:, start:end],
+            combat_score[:, start:end],
+            seed=None if seed is None else seed + window_index,
+            **sampling,
+        )
+        codes = torch.cat([codes, window_codes[:, :, context:]], dim=-1)
+        window_index += 1
+
+    return codes
 
 
 # ── Prompt and decoding helpers ──
