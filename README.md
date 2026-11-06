@@ -17,6 +17,34 @@ Skyrim and Witcher 3 soundtrack excerpts.
 - Report: `DLAIReport2026.pdf` - to be updated
 - Demo: *link  to add after publication*
 
+## Changes since the first submission
+
+The first submission is tagged
+[`submission-v1`](https://github.com/DanBracs7/Adaptive-Secunda-Synth/tree/submission-v1).
+Every change was developed on the `revision` branch and then merged into
+`main`; the full difference is
+[`submission-v1...main`](https://github.com/DanBracs7/Adaptive-Secunda-Synth/compare/submission-v1...main).
+
+| Point of the evaluation | What changed | Where |
+|---|---|---|
+| Controllability never tested; teacher-forced cross-entropy only | Condition ablation (E1), controls re-extracted from 288 generated clips and compared with the requested ones (E2), blind listening test (E3) | notebooks 04, 05, `src/listening_test.py`; report Section 4, Figure 1 |
+| Baseline -> Slakh-FT mixes more data and new loss weights | Two control runs, R1 and R2, that change one factor at a time, and a decomposition with confidence intervals (E4) | notebooks 06, 07; report Section 5, Table 1 |
+| Delay pattern not undone during generation | New generator that samples in the delayed space and undoes the delay; its logits equal teacher forcing within 3e-5 | `src/generation.py`, `tests/test_generation.py`, notebook 03 |
+| Controls sent on a 0-9 scale | Controls in [0, 1] with the training normalisation; values outside [0, 1] are rejected | `src/generation.py` |
+| Related work too short | Controllable and continuous-valued conditioning, adaptive game music | report Section 2 |
+| "Adaptive" not defined, no supporting reference | Definition, success criterion and references | report Section 1 |
+| Figure 1 repeats Table 1 | Figure 1 now shows the requested and measured controls | report Figure 1 |
+| CP1 / CP2 / CP3 out of order, "AUX unplugged" | Chronological names Baseline, Slakh-FT, OST-FT; the metaphor is replaced by a plain description | whole report |
+| Hardcoded Kaggle paths | All paths resolved in one place | `src/paths.py` |
+| Notebooks without outputs | Notebooks 00-07 executed with their outputs; the old ones moved to `notebooks/archive/` | `notebooks/` |
+| Checkpoints and tensors not available | Checkpoints and Slakh tensors public on Kaggle | section *Checkpoints and data* |
+| README points to a missing `report/` folder | README rewritten | this file |
+
+The old generation script is kept for reference in
+`src/archive/generation_test_8cb.py`. Also new: tests for every module
+(`tests/`), a key/value cache that makes generation 6 to 13 times faster
+on a CPU (`src/benchmark_generation.py`), and the demo.
+
 ## Results at a glance
 
 All numbers come from the executed notebooks listed below.
