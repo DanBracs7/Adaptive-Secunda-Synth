@@ -102,11 +102,11 @@ def test_experiment_section():
         pools, pool_audio = demo_page.collect_pools(demo_page.load_selection(bank / "demo_selection.csv"), bank)
     assert len(examples) == 2 and len(audio) == 2 * len(demo_page.EXPERIMENT_CONDITIONS)
     page = demo_page.build_page(pools, examples, {**pool_audio, **audio})
-    assert "Same prompt, different requests" in page and page.count("<audio controls") == 6
+    assert "What the controls alone do" in page and page.count("<audio controls") == 6
     assert json.loads(page.split("const POOLS = ", 1)[1].split(";\n", 1)[0]).keys() == {"chill", "fight"}
     assert demo_page.REPOSITORY_URL in page
     page_without = demo_page.build_page(pools, [], pool_audio)
-    assert "Same prompt, different requests" not in page_without and "<audio controls" not in page_without
+    assert "What the controls alone do" not in page_without and "<audio controls" not in page_without
 
 
 if __name__ == "__main__":
