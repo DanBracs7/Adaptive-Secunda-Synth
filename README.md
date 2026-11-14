@@ -113,7 +113,7 @@ python src/demo_page.py        # docs/index.html
 |---|---|---|
 | Baseline | [secunda-slakh-60-epochs](https://www.kaggle.com/datasets/danielebracoloni/secunda-slakh-60-epochs) | CC BY 4.0 |
 | Slakh-FT | [secunda-finetuned-on-slakh](https://www.kaggle.com/models/danielebracoloni/secunda-finetuned-on-slakh) | CC BY 4.0 |
-| OST-FT | [secunda-finetuned-on-ost-v2](https://www.kaggle.com/models/danielebracoloni/secunda-finetuned-on-ost-v2) | research and educational use |
+| OST-FT | [secunda-finetuned-on-ost-v2](https://www.kaggle.com/models/danielebracoloni/secunda-finetuned-on-ost-v2) | CC BY-NC 4.0 |
 | R1, R2 | [secunda-e4-control-runs](https://www.kaggle.com/datasets/danielebracoloni/secunda-e4-control-runs) | CC BY 4.0 |
 | Slakh tensors | [slakh-tensors-final](https://www.kaggle.com/datasets/danielebracoloni/slakh-tensors-final) | CC BY 4.0 |
 
@@ -165,11 +165,12 @@ Scripts outside the notebooks:
 ## Repository structure
 
 ```text
-src/          model, data, controls, generation, training loop, experiments
-tests/        tests for every module (no GPU or checkpoint needed)
+src/          model, data, controls, generation, training loop, experiments, demo
+tests/        tests of the code (no GPU or checkpoint needed)
 notebooks/    executed notebooks 00-07, archive/ with the first submission
-configs/      normalisation statistics, preprocessing configuration, demo passages
-manifests/    track list with train / validation / test split
+configs/      normalisation statistics, excluded tensors, preprocessing configuration, demo passages
+manifests/    track list with train / validation / test split (all_tracks.csv; older versions kept for the earlier splits)
+csv/          per-track feature tables, used to check configs/norm_stats.json (notebook 02, src/verify_norm_stats.py)
 results/      tables and figures written by the notebooks and scripts
 figures/      figures of the report
 docs/         demo page (GitHub Pages)
