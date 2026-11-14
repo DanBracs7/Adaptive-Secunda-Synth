@@ -1,10 +1,12 @@
 """
 Figures of the report, drawn from the saved results (no GPU, no checkpoints).
 
-  figure1  Controls measured on generated audio (experiment E2, notebook 05):
-           (a) tension requested and measured around a step at 5 s,
-           (b) fraction of each requested change that is realised.
-           Source: results/control_adherence/{tension_curves.npz, clips.csv}.
+  figure1  Tension requested and measured around a step at 5 s on generated
+           audio (experiment E2, notebook 05).
+           Source: results/control_adherence/tension_curves.npz.
+  figure_a_effects
+           Fraction of each requested change that is realised (E2, appendix).
+           Source: results/control_adherence/clips.csv.
   figure_a_e4
            Decomposition of the Baseline -> Slakh-FT improvement per codebook
            (experiment E4, notebook 07) and validation curves of R1 and R2.
@@ -108,16 +110,14 @@ def realised_fractions(clips):
 
 def figure1():
     curves = np.load(RESULTS / "control_adherence" / "tension_curves.npz")
-    clips = pd.read_csv(RESULTS / "control_adherence" / "clips.csv")
 
-    figure, (step_axis, effect_axis) = plt.subplots(
-        2, 1, figsize=(COLUMN_WIDTH, 3.55), gridspec_kw={"height_ratios": [1.0, 1.25], "hspace": 0.55})
+    figure, step_axis = plt.subplots(figsize=(COLUMN_WIDTH, 1.2))
 
-    # (a) Tension step: requested vs measured, mean over the 24 prompt x seed units.
+    # Tension step: requested vs measured, mean over the 24 prompt x seed units.
     frames = np.arange(ca.TOTAL_FRAMES)
     seconds = frames / ca.FRAME_RATE
     step_axis.axvspan(0, ca.PROMPT_FRAMES / ca.FRAME_RATE, color=PROMPT_SHADE, lw=0)
-    step_axis.text(0.5, 0.93, "prompt", ha="center", va="top", color=TEXT_SECONDARY, fontsize=6)
+    step_axis.text(0.5, 0.97, "prompt", ha="center", va="top", color=TEXT_SECONDARY, fontsize=6)
     requested = np.where(frames < ca.STEP_FRAME, ca.LEVELS["tension"]["low"], ca.LEVELS["tension"]["high"])
     after_prompt = frames >= ca.PROMPT_FRAMES
     step_axis.plot(seconds[after_prompt], requested[after_prompt], ls=(0, (3, 2)), lw=1.0,
@@ -126,20 +126,29 @@ def figure1():
         keys = [key for key in curves.files if key.startswith(f"{checkpoint}|") and key.endswith("|tension_step")]
         mean, low, high = mean_and_ci([curves[key] for key in keys])
         step_axis.fill_between(seconds, low, high, color=color, alpha=0.18, lw=0)
-        step_axis.plot(seconds, mean, color=color, lw=1.1, label=f"{checkpoint} (measured)")
+        step_axis.plot(seconds, mean, color=color, lw=1.1, label=checkpoint)
     step_axis.set_xlim(0, 10)
     step_axis.set_ylim(0, 1)
+    # The unit goes on the last tick instead of an axis label, to keep the figure short.
     step_axis.set_xticks([0, 1, 2, 4, 5, 6, 8, 10])
+    step_axis.set_xticklabels(["0", "1", "2", "4", "5", "6", "8", "10 s"])
     step_axis.set_yticks([0, 0.14, 0.5, 0.77, 1])
     step_axis.set_yticklabels(["0", "0.14", "0.5", "0.77", "1"])
-    step_axis.set_xlabel("time (s)")
     step_axis.set_ylabel("tension")
     step_axis.grid(axis="y", color=GRID, lw=0.5)
     step_axis.set_axisbelow(True)
-    step_axis.legend(loc="lower left", bbox_to_anchor=(0.11, 0.2), frameon=False, handlelength=1.8)
-    step_axis.set_title("(a) Tension step at 5 s", loc="left", color=TEXT)
+    step_axis.legend(loc="lower left", bbox_to_anchor=(0.12, 0.17), frameon=False, handlelength=1.8,
+                     labelspacing=0.25, borderaxespad=0.0)
 
-    # (b) Fraction of each requested change that is realised.
+    save(figure, "fig1_control_adherence")
+
+
+def figure_a_effects():
+    clips = pd.read_csv(RESULTS / "control_adherence" / "clips.csv")
+
+    figure, effect_axis = plt.subplots(figsize=(1.4 * COLUMN_WIDTH, 2.0))
+
+    # Fraction of each requested change that is realised.
     table = realised_fractions(clips)
     labels = list(dict.fromkeys(table["effect"]))
     positions = np.arange(len(labels))[::-1].astype(float)
@@ -163,10 +172,10 @@ def figure1():
     effect_axis.grid(axis="x", color=GRID, lw=0.5)
     effect_axis.set_axisbelow(True)
     effect_axis.spines["left"].set_visible(False)
-    effect_axis.legend(loc="lower right", frameon=False, handletextpad=0.3, borderaxespad=0.1)
-    effect_axis.set_title("(b) Effect of each control", loc="left", color=TEXT)
+    effect_axis.legend(loc="lower right", bbox_to_anchor=(0.86, 0.0), frameon=False, handletextpad=0.3,
+                       borderaxespad=0.1)
 
-    save(figure, "fig1_control_adherence")
+    save(figure, "figA_control_effects")
     return table
 
 
@@ -218,7 +227,8 @@ def figure_a_e4():
 
 
 def main():
-    table = figure1()
+    figure1()
+    table = figure_a_effects()
     print(table.to_string(index=False, float_format=lambda value: f"{value:.3f}"))
     figure_a_e4()
 

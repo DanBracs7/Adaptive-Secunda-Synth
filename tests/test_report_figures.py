@@ -1,10 +1,10 @@
 """
 Tests for src/report_figures.py, on the saved results in results/.
 
-1. The realised fractions of Figure 1 (b) equal the gains of the E2
-   analysis (control_adherence.factorial_effects), and every interval
-   contains its estimate.
-2. Both figures are written as PDF and PNG.
+1. The realised fractions of the appendix effects figure equal the gains
+   of the E2 analysis (control_adherence.factorial_effects), and every
+   interval contains its estimate.
+2. All three figures are written as PDF and PNG.
 
 Run from the repository root:
     python tests/test_report_figures.py
@@ -40,9 +40,11 @@ def test_figures_are_written():
     with tempfile.TemporaryDirectory() as folder:
         report_figures.FIGURES = Path(folder)
         report_figures.figure1()
+        report_figures.figure_a_effects()
         report_figures.figure_a_e4()
         names = sorted(path.name for path in Path(folder).iterdir())
     assert names == ["fig1_control_adherence.pdf", "fig1_control_adherence.png",
+                     "figA_control_effects.pdf", "figA_control_effects.png",
                      "figA_e4_decomposition.pdf", "figA_e4_decomposition.png"], names
 
 
