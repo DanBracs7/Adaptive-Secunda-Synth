@@ -11,6 +11,9 @@ Tests for src/demo_clips.py (no tensors, checkpoint or codec needed).
    codebook.
 4. By default a bank clip and its prompt fit in one 10-s window, and the
    bank covers all passages of configs/demo_prompts.csv.
+5. Loops: crossfade_concat has the expected length and leaves the audio
+   outside the crossfades unchanged; write_loop joins the takes from
+   their WAV files; --labels and --tag select the passages and the folder.
 
 Run from the repository root:
     python tests/test_demo_clips.py
@@ -18,8 +21,11 @@ Run from the repository root:
 
 import inspect
 import sys
+import tempfile
 from pathlib import Path
 
+import numpy as np
+import soundfile
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -69,9 +75,44 @@ def test_bank_defaults():
     assert len(labels) == 36 and set(labels) == {"chill", "fight"}
 
 
+def test_crossfade_concat():
+    a, b, c = np.full(1000, 0.5), np.full(800, -0.3), np.full(600, 0.1)
+    joined = demo_clips.crossfade_concat([a, b, c], crossfade_samples=100)
+    assert len(joined) == 1000 + 800 + 600 - 2 * 100
+    assert np.allclose(joined[:900], 0.5)                          # before the first crossfade
+    assert np.allclose(joined[1000:1600], -0.3)                    # between the crossfades
+    assert np.allclose(joined[-500:], 0.1)                         # after the last crossfade
+    assert np.allclose(demo_clips.crossfade_concat([a], 100), a)   # one take: unchanged
+
+
+def test_write_loop():
+    rate = demo_clips.SAMPLE_RATE
+    with tempfile.TemporaryDirectory() as folder:
+        folder = Path(folder)
+        for take in range(3):
+            soundfile.write(str(folder / f"fight_x_0m00_t{take + 1}_generated.wav"),
+                            np.full(3 * rate, 0.1 * (take + 1)), rate, subtype="PCM_16")
+        fields = demo_clips.write_loop(folder, "fight_x_0m00", [f"fight_x_0m00_t{t}" for t in (1, 2, 3)])
+        loop, loop_rate = soundfile.read(str(folder / "fight_x_0m00_loop.wav"))
+    crossfade = int(demo_clips.LOOP_CROSSFADE_SECONDS * rate)
+    assert loop_rate == rate and len(loop) == 3 * 3 * rate - 2 * crossfade
+    assert fields["generated_file"] == "fight_x_0m00_loop.wav"
+    assert fields["with_prompt_file"] == "fight_x_0m00_t1_with_prompt.wav"
+    assert fields["takes"] == 3 and fields["clipped_fraction"] == 0.0
+
+
+def test_bank_selection():
+    fights = demo_clips.bank_passages(["fight"])
+    assert fights and all(p["label"] == "fight" for p in fights)
+    assert len(demo_clips.bank_passages()) == len(demo_clips.load_all_passages())
+    assert demo_clips.bank_folder("base").name == "base"
+    assert demo_clips.bank_folder("base", "3s").name == "base_3s"
+
+
 if __name__ == "__main__":
     for test in (test_control_track, test_control_track_holds_prompt_level, test_pilot_passages,
-                 test_sweep_settings, test_bank_defaults):
+                 test_sweep_settings, test_bank_defaults, test_crossfade_concat, test_write_loop,
+                 test_bank_selection):
         test()
         print("PASS", test.__name__)
     print("All demo_clips tests passed.")
