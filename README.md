@@ -34,7 +34,7 @@ faster generation and a playable browser demo are also new.
 
 ## Results at a glance
 
-All numbers come from the executed notebooks listed below.
+All numbers come from the executed notebooks and scripts listed below.
 
 - **The model uses the controls (E1).** Replacing the real controls with
   those of another track raises the test cross-entropy by 0.87; almost
@@ -95,7 +95,8 @@ consecutive clips of the same state.
   (CC BY 4.0, so their 1-s real prompt is kept): the same prompt and
   random numbers with low controls, high controls, and a tension step at
   5 s. These prompts were picked by a rule, not by ear: their measured
-  tension change is the closest to the median of the 12 E2 prompts.
+  tension change is the closest to the median of the 12 Slakh prompts
+  of E2.
 
 To rebuild the page (needs the OST-FT checkpoint and the soundtrack
 audio, which is not distributed, and the WAV files of notebook 05):
