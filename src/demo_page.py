@@ -158,7 +158,7 @@ button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(
 </div>
 <div class="pad" aria-label="Movement pad"><button class="up" data-dir="up" aria-label="Up">&#9650;</button><button class="left" data-dir="left" aria-label="Left">&#9664;</button><button class="down" data-dir="down" aria-label="Down">&#9660;</button><button class="right" data-dir="right" aria-label="Right">&#9654;</button></div>
 </div>
-<p class="muted" style="margin-top:14px">Secunda cannot generate in real time on a CPU, so the demo plays clips generated in advance. Each clip continues a few seconds of a Skyrim or Witcher&nbsp;3 passage with the controls of its state; only the generated part is played, never the original music. Expect codec artefacts: the model predicts 8 EnCodec codebooks (6&nbsp;kbps).</p>
+<p class="muted" style="margin-top:14px">Secunda cannot generate in real time on a CPU, so the demo plays clips generated in advance. A  GPU might make real-time generation possible, but this was not tested. The rule that picks the state is deliberately simple: it only checks whether the player is inside the enemy camp, as a stand-in for “an enemy is approaching”. A real game could compute the two controls from any part of its state, such as the distance to the enemies or the player's health. Each clip continues a few seconds of a Skyrim or Witcher&nbsp;3 passage with the controls of its state; only the generated part is played, never the original music. Expect codec artefacts: the model predicts 8 EnCodec codebooks (6&nbsp;kbps).</p>
 
 __EXPERIMENT_SECTION__
 
