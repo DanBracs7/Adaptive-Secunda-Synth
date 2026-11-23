@@ -84,7 +84,7 @@ consecutive clips of the same state.
   prompt's own level to the target in 1 s. Only the generated part is
   played: the soundtracks are under copyright and are never published.
 - Exploration clips are 5 s of generated audio. Some combat clips are
-  loops: since the quality of a continuation drops with its distance
+  loops: since the quality seemed to drop with its distance
   from the prompt, four 3-s continuations of the same prompt (different
   seeds) are joined with 0.25-s equal-power crossfades into one 11.25-s
   loop.
@@ -131,8 +131,13 @@ them; their outputs are kept in the executed notebooks.
 ## Notebooks
 
 Every notebook is executed, keeps its outputs, and lists its Kaggle
-inputs in its first cell. On Kaggle it clones this repository and imports
-the code from `src/`; all paths are resolved by `src/paths.py`.
+inputs in its first cell, except `06_e4_control_runs`, which is a
+template: the two control runs use the same notebook with a different
+`RUN_NAME`, and each took 18-20 hours on a T4 over two Kaggle sessions,
+so each was executed in its own copy, `06_e4_control_runs_R1` and
+`06_e4_control_runs_R2`, which keep their outputs. On Kaggle each
+notebook clones this repository and imports the code from `src/`; all
+paths are resolved by `src/paths.py`.
 
 | Notebook | Content | Report |
 |---|---|---|
