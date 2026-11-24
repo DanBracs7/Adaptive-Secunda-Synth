@@ -128,7 +128,7 @@ def source_roots_for_split(split):
 
     Slakh test tensors keep source="slakh" in the manifest but live in a
     different folder from the Slakh train/val tensors
-    (see scripts/build_manifest.py), so the root depends on the split.
+    (see src/build_manifest.py), so the root depends on the split.
     """
     slakh_key = "slakh_test" if split == "test" else "slakh_train"
 
