@@ -12,7 +12,7 @@ paths are now resolved here, in this order:
   4. local defaults, relative to the repository root.
 
 Local layout expected by the defaults (same folders used by
-scripts/build_manifest.py):
+src/build_manifest.py):
 
   datasets/slakh_final_1395_tensors/{train,test}/*.pt
   datasets/skyrim/*.pt
