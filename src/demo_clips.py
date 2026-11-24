@@ -1,5 +1,5 @@
 """
-Clips for the demo (Phase 4), generated from the hand-picked prompts of
+Clips for the demo, generated from the hand-picked prompts of
 configs/demo_prompts.csv.
 
 The character of a clip comes from its prompt (a few seconds of a calm or

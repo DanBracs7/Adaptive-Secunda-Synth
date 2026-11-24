@@ -50,10 +50,12 @@ All numbers come from the executed notebooks and scripts listed below.
   heard in 19/24 answers (7/8, 4/8 and 8/8 per listener; two-sided
   binomial p = 0.007 on the pooled answers, 12/16 and p = 0.08 without
   the author). Counts per block: `results/listening_test/summary.csv`.
-- **What drives the fine-tuning gain (E4).** Two control runs show that
-  91% of the Baseline -> Slakh-FT improvement comes from the extra
-  training, 21% from the larger dataset, and that the new loss weights
-  cost 12%.
+- **What drives the fine-tuning gain (E4).** Two control runs attribute
+  91% of the Baseline -> Slakh-FT improvement to the extra training, 21%
+  to the larger dataset, and a cost of 12% to the new loss weights. They
+  also revealed that the original training code reused the same crops in
+  every epoch (notebook 08): the extra training also brings new crops,
+  and the loss-weight step compares new with reused crops.
 
 | Checkpoint | Training | Test cross-entropy (unweighted, 151 Slakh tracks) |
 |---|---|---:|
@@ -84,7 +86,7 @@ consecutive clips of the same state.
   prompt's own level to the target in 1 s. Only the generated part is
   played: the soundtracks are under copyright and are never published.
 - Exploration clips are 5 s of generated audio. Some combat clips are
-  loops: since the quality seemed to drop with its distance
+  loops: since the quality seemed to drop with the distance
   from the prompt, four 3-s continuations of the same prompt (different
   seeds) are joined with 0.25-s equal-power crossfades into one 11.25-s
   loop.
@@ -132,9 +134,9 @@ them; their outputs are kept in the executed notebooks.
 
 Every notebook is executed, keeps its outputs, and lists its Kaggle
 inputs in its first cell, except `06_e4_control_runs`, which is a
-template: the two control runs use the same notebook with a different
-`RUN_NAME`, and each took 18-20 hours on a T4 over two Kaggle sessions,
-so each was executed in its own copy, `06_e4_control_runs_R1` and
+template: R1 and R2 use the same notebook with a different `RUN_NAME`,
+and each took 18-20 hours on a T4 over two Kaggle sessions, so each
+was executed in its own copy, `06_e4_control_runs_R1` and
 `06_e4_control_runs_R2`, which keep their outputs. On Kaggle each
 notebook clones this repository and imports the code from `src/`; all
 paths are resolved by `src/paths.py`.
@@ -149,6 +151,7 @@ paths are resolved by `src/paths.py`.
 | `05_control_adherence` | E2: controls measured on 288 generated clips | Section 4, Figure 1, appendix |
 | `06_e4_control_runs` (`_R1`, `_R2`) | E4: training and test evaluation of the control runs | Section 4, Table 1 |
 | `07_e4_decomposition` | E4: decomposition with bootstrap confidence intervals | Section 4, appendix |
+| `08_e4_crop_reuse` | E4: crops reused by the original training notebooks | Section 4, appendix |
 | `archive/` | Original notebooks of the first submission (tokenizer, training, evaluation) | - |
 
 Scripts outside the notebooks:
@@ -173,7 +176,7 @@ Scripts outside the notebooks:
 ```text
 src/          model, data, controls, generation, training loop, experiments, demo
 tests/        tests of the code (no GPU or checkpoint needed)
-notebooks/    executed notebooks 00-07, archive/ with the first submission
+notebooks/    executed notebooks 00-08, archive/ with the first submission
 configs/      normalisation statistics, excluded tensors, preprocessing configuration, demo passages
 manifests/    track list with train / validation / test split (all_tracks.csv; older versions kept for the earlier splits)
 csv/          per-track feature tables, used to check configs/norm_stats.json (notebook 02, src/verify_norm_stats.py)

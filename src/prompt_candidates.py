@@ -1,5 +1,5 @@
 """
-Prompt selection for the demo (Phase 4).
+Prompt selection for the demo.
 
 The generated music takes its character (instruments, atmosphere) from
 the prompt, while tension and combat score set its intensity (notebooks
